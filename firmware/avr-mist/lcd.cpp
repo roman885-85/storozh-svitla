@@ -50,10 +50,13 @@ static void release() {
   if (pBl >= 0) { ledcDetach(pBl); pinMode(pBl, INPUT); pBl = -1; }
   sentOk = false;
 }
+static int blNow = -1;                             // підсвітка зараз, % (для сторінки; -1 — виводу підсвітки немає)
 static void blSet() {
-  if (pBl < 0) return;
-  uint8_t pct = testing() && tBri >= 0 ? tBri : sigQuietNow() ? S.lcdNight : S.lcdBri;
+  if (pBl < 0) { blNow = -1; return; }
+  //  1.0.28: уночі підсвітка гасне (nLcdOff) або світить на lcdNight %; перевірка дисплея зі сторінки — як удень.
+  uint8_t pct = testing() ? (tBri >= 0 ? tBri : S.lcdBri) : sigNightNow() ? (S.nLcdOff ? 0 : S.lcdNight) : S.lcdBri;
   bool low = testing() && tBlLow >= 0 ? tBlLow : S.lcdBlLow;
+  blNow = pct;
   uint32_t d = (uint32_t)pct * 255 / 100;
   ledcWrite(pBl, low ? 255 - d : d);
 }
@@ -528,7 +531,7 @@ String lcdJson() {
   o.reserve(1100);
   o = String("{\"on\":") + (S.lcdOn ? "true" : "false") + ",\"live\":" + (pClk >= 0 ? "true" : "false") + ",\"us\":" + String(frameUs) +
       ",\"frames\":" + String(frames) + ",\"test\":" + String(testing() ? tMode : -1) +
-      ",\"vop\":" + String(vopNow()) + ",\"bias\":" + String(biasNow()) + ",\"fb\":\"";
+      ",\"vop\":" + String(vopNow()) + ",\"bias\":" + String(biasNow()) + ",\"bl\":" + String(blNow) + ",\"fb\":\"";
   for (int i = 0; i < 504; i++) { o += hx[fb.fb[i] >> 4]; o += hx[fb.fb[i] & 15]; }
   return o + "\"}";
 }

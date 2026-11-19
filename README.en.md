@@ -37,7 +37,8 @@ Beacons on individual lines or phases report where voltage is present.
 - **Nokia 5110 display:** big status text, "off since 13:53 / 3 h 5 min already", the schedule as a scrolling line
   (adjustable speed), flashing and blinking on events, announcements; display and wiring self-test from the web page.
 - **On-site signals:** two LEDs or a WS2812B strip (colours, effects, wave), a buzzer or a speaker via the DAC
-  (built-in sounds or your own file), night quiet hours. Settings apply instantly.
+  (built-in sounds or your own file). At night the LEDs, the strip and the display backlight switch off (or dim), sound
+  optionally too. Settings apply instantly.
 - **Web settings page:** login, lockout after wrong passwords, wiring diagrams with the current pins, over-the-air
   updates with self-check and automatic rollback.
 - **Reliability:** statistics, the Telegram queue, page logins and the current state with its start time survive

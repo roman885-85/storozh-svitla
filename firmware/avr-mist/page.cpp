@@ -127,6 +127,16 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
   <div style="margin-top:10px"><button class="p" data-act="botphoto">Поставити картинку</button> <span id="phst" class="mut"></span></div><div id="phmsg"></div></div>
 </section>
 <section id="sg" class="hide">
+ <div class="card" id="ngcard"><b>🌙 Ніч</b> <span class="mut" id="g_ngst"></span>
+  <div class="flex" style="align-items:center;margin-top:8px"><span class="mut">Нічні години: з</span><input type="number" id="g_qFrom" min="0" max="23" style="max-width:80px;flex:none"><span class="mut">до</span><input type="number" id="g_qTo" min="0" max="23" style="max-width:80px;flex:none"><span class="mut">години</span></div>
+  <div id="g_nLedRow"><label class="ck"><input type="checkbox" id="g_nLedOff"> Світлодіоди й стрічка вночі гаснуть</label>
+   <div id="g_nLedPct"><label>Не гаснуть — уночі світять на <b id="g_stripNightV"></b> % від денної яскравості</label><input type="range" id="g_stripNight" min="0" max="100" step="5"></div></div>
+  <div id="g_nLcdRow"><label class="ck"><input type="checkbox" id="g_nLcdOff"> Підсвітка дисплея вночі гасне <span class="mut">(екран показує далі — його видно, коли в приміщенні світло)</span></label>
+   <div id="g_nLcdPct"><label>Не гасне — підсвітка вночі: <b id="g_lcdNightV"></b> %</label><input type="range" id="g_lcdNight" min="0" max="100" step="5"></div></div>
+  <div id="g_nSndRow"><label class="ck"><input type="checkbox" id="g_qOn"> Уночі без звуку <span class="mut">(Telegram — як завжди: тихі нічні повідомлення кожен вибирає сам)</span></label></div>
+  <div style="margin-top:10px"><button data-act="tled" data-w="night">Показати ніч — 15 с</button> <button data-act="tled" data-w="off">Звичайний режим</button></div>
+  <div class="mut" style="margin-top:6px">Перевірки зі сторінки — «Показати…», «Спалахи», «Хвиля», перевірка дисплея — світять і вночі. Однакові години «з» і «до» — ночі немає.</div>
+ </div>
  <div class="card"><b>Індикатор світла</b>
   <label>Що підключено</label>
   <select id="g_ind"><option value="none">Нічого</option><option value="two">Два світлодіоди: зелений і червоний</option><option value="strip">Адресна RGB-стрічка WS2812B — рекомендовано</option></select>
@@ -139,7 +149,6 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
   <div id="g_strip">
    <div class="flex"><div style="flex:1;min-width:140px"><label>Вивід даних (DIN)</label><select id="g_stripPin"></select></div><div style="flex:1;min-width:140px"><label>Світлодіодів у стрічці</label><input type="number" id="g_stripN" min="1" max="60"></div></div>
    <label>Яскравість: <b id="g_stripBriV"></b> %</label><input type="range" id="g_stripBri" min="5" max="100" step="5">
-   <label>Уночі, у години тиші: <b id="g_stripNightV"></b> %</label><input type="range" id="g_stripNight" min="0" max="100" step="5">
    <div><label class="col"><input type="color" id="g_colOn"> світло є</label><label class="col"><input type="color" id="g_colOff"> світла немає</label><label class="col"><input type="color" id="g_colGen"> працює генератор</label><label class="col"><input type="color" id="g_colUnk"> визначається</label></div>
    <div class="flex"><div style="flex:1;min-width:150px"><label>Коли світло є</label><select id="g_stFxOn"><option value="0">Рівний колір</option><option value="1">Безперервна хвиля</option></select></div>
    <div style="flex:1;min-width:150px"><label>Коли світла немає</label><select id="g_stripFx"><option value="1">Дихає — плавно гасне й розгорається</option><option value="0">Блимає</option><option value="2">Біжить вогник</option><option value="3">Безперервна хвиля</option></select></div>
@@ -163,8 +172,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
   <label class="ck"><input type="checkbox" id="g_lcdBlLow"> Підсвітка вмикається низьким рівнем: поставте, якщо повзунок підсвітки діє навпаки — більше відсотків, а світить тьмяніше (червона плата: LIGHT на GND світить)</label>
   <label>Контраст: <b id="g_lcdVopV"></b> <span class="mut">(блідо — більше, сіре тло — менше; зазвичай 50–65)</span></label><input type="range" id="g_lcdVop" min="10" max="127" step="1">
   <label>Зсув (bias) <span class="mut">— напруга для рідких кристалів; типово 4. «Усе чорне» не темніє за жодного контрасту — спробуйте 3 чи 5 або «Пошук контрасту»</span></label><select id="g_lcdBias"><option value="2">2</option><option value="3">3</option><option value="4">4 — типово</option><option value="5">5</option><option value="6">6</option></select>
-  <label>Підсвітка вдень: <b id="g_lcdBriV"></b> %</label><input type="range" id="g_lcdBri" min="0" max="100" step="5">
-  <label>Підсвітка вночі: <b id="g_lcdNightV"></b> % <span class="mut">(у години «Тиші вночі» з картки «Звук»)</span></label><input type="range" id="g_lcdNight" min="0" max="100" step="5">
+  <label>Підсвітка: <b id="g_lcdBriV"></b> % <span class="mut">(уночі — картка «🌙 Ніч» угорі)</span></label><input type="range" id="g_lcdBri" min="0" max="100" step="5">
   <label class="ck"><input type="checkbox" id="g_lcdInv"> Інверсія: світлі літери на темному</label>
   <label class="ck"><input type="checkbox" id="g_lcdFlip"> Перевернути на 180° (дисплей закріплено догори дриґом)</label>
   <label>Графік на дисплеї — біжучий рядок: швидкість <b id="g_lcdMqV"></b> <span class="mut">(0 — сторінками по 3 с; 1 — повільно, 10 — швидко)</span></label><input type="range" id="g_lcdMq" min="0" max="10" step="1">
@@ -188,8 +196,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
    <div class="flex" style="align-items:center"><span class="mut">повторів</span><input type="number" id="g_sndRep" min="1" max="10" style="max-width:80px;flex:none"><span class="mut">через 3 с; світло повернулось — повтори припиняються</span></div>
    <label class="ck"><input type="checkbox" id="g_sndBack"> Коли світло з'явилось</label>
    <label class="ck"><input type="checkbox" id="g_sndBoot"> І після перезапуску Сторожа</label>
-   <label class="ck"><input type="checkbox" id="g_qOn"> Тиша вночі: без звуку, стрічка тьмяніша; Telegram — як завжди</label>
-   <div class="flex" style="align-items:center"><span class="mut">з</span><input type="number" id="g_qFrom" min="0" max="23" style="max-width:80px;flex:none"><span class="mut">до</span><input type="number" id="g_qTo" min="0" max="23" style="max-width:80px;flex:none"><span class="mut">години</span></div>
+   <div class="mut">Уночі без звуку — картка «🌙 Ніч» угорі.</div>
    <div id="g_wire" class="mut" style="margin-top:8px"></div>
    <div style="margin-top:10px"><button data-act="tsnd" data-w="lost">Програти «світло зникло»</button> <button data-act="tsnd" data-w="back">Програти «світло є»</button></div>
   </div>
@@ -469,7 +476,7 @@ const WIRE={1:'Активний бузер: вивід → резистор 1 к
  2:'Пасивний бузер: так само через транзистор (вивід → 1 кОм → база S8050; колектор → бузер → 5 В), паралельно бузеру діод 1N4148. Напряму з виводу — тихо.',
  3:'ЦАП дає слабкий сигнал — потрібен підсилювач: модуль PAM8403 (5 В) або LM386. Вивід ЦАП → конденсатор 1–10 мкФ → вхід підсилювача (L чи R), GND плати → GND підсилювача, динамік 4–8 Ом — до виходу підсилювача. Хрипить чи «рипить» — підсилювач перевантажений: зменште гучність тут (PAM8403 без регулятора — 20–40 %). Найчистіше — регулятор на підсилювачі менше, а гучність тут 80–100 %; без регулятора — дільник перед входом: 4,7 кОм послідовно й 1 кОм на GND.'};
 const SIGK=['ledG','ledR','ledBri','ledBlink','stripPin','stripN','stripBri','stripNight','stripOrder','stripFx','stripMa','stFxOn','stFxGen','stWvSpd','stWvInt','lcdRst','lcdCe','lcdDc','lcdDin','lcdClk','lcdBl','lcdVop','lcdBri','lcdNight','lcdBias','lcdMq','lcdFxSec','lcdAnnMin','sndType','sndPin','dacPin','sndVol','sndRep','qFrom','qTo','melLost','melBack','patLost','patBack','srcLost','srcBack','colOn','colOff','colGen','colUnk'];
-const SIGB=['ledLow','stripAnim','sndLost','sndBack','sndBoot','qOn','lcdOn','lcdBlLow','lcdInv','lcdFlip','lcdFx'];
+const SIGB=['ledLow','stripAnim','sndLost','sndBack','sndBoot','qOn','lcdOn','lcdBlLow','lcdInv','lcdFlip','lcdFx','nLedOff','nLcdOff'];
 function gamma(v){return Math.pow(v,2.2)}
 function stripHint(){const n=Math.max(1,+$('g_stripN').value||1),b=gamma((+$('g_stripBri').value||0)/100),hx=$('g_colOn').value||'#00ff00',
  c=[1,3,5].map(i=>parseInt(hx.substr(i,2),16)/255).reduce((a,x)=>a+gamma(x),0),ma=Math.min(+$('g_stripMa').value||400,n*c*20*b);
@@ -478,13 +485,16 @@ function sigShow(){const ind=$('g_ind').value,ty=+$('g_sndType').value;
  $('g_two').classList.toggle('hide',ind!=='two');$('g_strip').classList.toggle('hide',ind!=='strip');$('g_blinkbox').classList.toggle('hide',ind==='none');$('g_ledbtns').classList.toggle('hide',ind==='none');document.querySelectorAll('.g_stonly').forEach(x=>x.classList.toggle('hide',ind!=='strip'));
  $('g_pinbox').classList.toggle('hide',!(ty===1||ty===2));$('g_dacbox').classList.toggle('hide',ty!==3);$('g_sndrest').classList.toggle('hide',ty===0);
  $('g_patbox').classList.toggle('hide',ty!==1);$('g_melbox').classList.toggle('hide',ty!==2);$('g_dsbox').classList.toggle('hide',ty!==3);
+ $('g_nLedRow').classList.toggle('hide',ind==='none');$('g_nLedPct').classList.toggle('hide',$('g_nLedOff').checked);
+ $('g_nLcdRow').classList.toggle('hide',!$('g_lcdOn').checked);$('g_nLcdPct').classList.toggle('hide',$('g_nLcdOff').checked);$('g_nSndRow').classList.toggle('hide',ty===0);
  $('g_wire').textContent=WIRE[ty]||'';['ledBri','stripBri','stripNight','sndVol','stWvSpd','stWvInt','lcdVop','lcdBri','lcdNight','lcdMq'].forEach(k=>$('g_'+k+'V').textContent=$('g_'+k).value);stripHint()}
 ['g_ind','g_sndType','g_ledBri','g_stripBri','g_stripNight','g_sndVol','g_stripN','g_stripMa','g_colOn','g_stWvSpd','g_stWvInt','g_lcdMq','g_lcdVop','g_lcdBri','g_lcdNight'].forEach(id=>$(id).addEventListener('input',sigShow));
+['g_nLedOff','g_nLcdOff','g_lcdOn','g_qFrom','g_qTo'].forEach(id=>$(id).addEventListener('change',()=>{sigShow();if(lastSt)sigStatus(lastSt)}));
 //  Знімок дисплея (1.0.22): 504 байти, 6 смуг по 8 рядків, біт 0 — верхня точка
 function drawLcd(hex){const c=$('lcdc'),x=c.getContext('2d'),im=x.createImageData(84,48);
  for(let p=0;p<504;p++){const b=parseInt(hex.substr(p*2,2),16),col=p%84,band=Math.floor(p/84);for(let k=0;k<8;k++){const on=(b>>k)&1,i=((band*8+k)*84+col)*4;im.data[i]=on?40:178;im.data[i+1]=on?48:196;im.data[i+2]=on?36:158;im.data[i+3]=255}}
  x.putImageData(im,0,0)}
-async function loadLcd(){try{const d=await j('/api/lcd');drawLcd(d.test===1||d.test===3?'ff'.repeat(504):d.test===2?Array.from({length:504},(_,i)=>(((i%84)>>2)+Math.floor(i/84))&1?'f0':'0f').join(''):d.fb);$('lcdst').textContent=d.on?(d.live?'Дисплей увімкнено: Сторож шле на нього цей самий кадр'+(d.frames?' (надіслано кадрів: '+d.frames+', останній — за '+(d.us/1000).toFixed(1)+' мс)':'')+'.'+(d.test>=0?' Зараз перевірка: '+['звичайний вигляд','усе чорне','шахівниця','пошук контрасту'][d.test]+', контраст '+d.vop+', зсув '+d.bias+'.':''):'Дисплей увімкнено, але виводи не зайнято — перевірте вибір виводів.'):'Дисплей вимкнено в налаштуваннях — це лише прев\'ю.'}catch(e){$('lcdst').textContent=e.message}}
+async function loadLcd(){try{const d=await j('/api/lcd');drawLcd(d.test===1||d.test===3?'ff'.repeat(504):d.test===2?Array.from({length:504},(_,i)=>(((i%84)>>2)+Math.floor(i/84))&1?'f0':'0f').join(''):d.fb);$('lcdst').textContent=d.on?(d.live?'Дисплей увімкнено: Сторож шле на нього цей самий кадр'+(d.frames?' (надіслано кадрів: '+d.frames+', останній — за '+(d.us/1000).toFixed(1)+' мс)':'')+'.'+(d.bl>=0?' Підсвітка зараз: '+(d.bl?d.bl+' %':'вимкнена')+'.':'')+(d.test>=0?' Зараз перевірка: '+['звичайний вигляд','усе чорне','шахівниця','пошук контрасту'][d.test]+', контраст '+d.vop+', зсув '+d.bias+'.':''):'Дисплей увімкнено, але виводи не зайнято — перевірте вибір виводів.'):'Дисплей вимкнено в налаштуваннях — це лише прев\'ю.'}catch(e){$('lcdst').textContent=e.message}}
 //  Перевірка дисплея (1.0.24): кнопки й живі повзунки → /api/lcdtest (лише пам'ять Сторожа)
 let lcdTesting=false,lcdTT=0,lcdSw=0;
 async function lcdTest(mode){const p=new URLSearchParams({vop:$('g_lcdVop').value,bri:$('g_lcdBri').value,bllow:$('g_lcdBlLow').checked?'1':'0',bias:$('g_lcdBias').value});if(mode)p.append('mode',mode);
@@ -496,9 +506,13 @@ $('g_lcdBias').addEventListener('change',()=>{if(lcdTesting)lcdTest('')});
 async function lcdHere(){try{const d=await j('/api/lcd');if(d.test!==3){note('lcdtmsg','Спершу «Пошук контрасту», потім — коли дисплей потемніє',1);return}
  $('g_lcdVop').value=d.vop;$('g_lcdBias').value=String(d.bias);sigShow();await lcdTest('all');
  note('lcdtmsg','Зупинено: контраст '+d.vop+', зсув '+d.bias+' (екран «усе чорне»). Підправте повзунком, «Звичайний вигляд» — перевірити картинку, далі «Зберегти».')}catch(err){note('lcdtmsg',err.message,1)}}
-function sigStatus(st){if(!st)return;
- $('g_ledst').textContent='Зараз індикатор: '+(st.led===1?'«світло є»':st.led===0?'«світла немає»':'нічого не показує')+(st.test?' — перевірка':'');
- $('g_sndst').textContent=(st.busy?'Грає… ':'')+(st.last?'Востаннє: '+st.last+'. ':'')+(st.quiet?'Зараз години тиші.':'');
+let lastSt=null;
+function hh(v){return String(+v).padStart(2,'0')+':00'}
+function sigStatus(st){if(!st)return;lastSt=st;
+ const f=$('g_qFrom').value,t=$('g_qTo').value;
+ $('g_ngst').textContent=st.demo?'— показ ночі: 15 с як уночі':+f===+t?'— години однакові: ночі немає':st.clock===false?'— годинник ще не встановлено: поки день':st.night?'— зараз ніч, до '+hh(t):'— зараз день, ніч з '+hh(f);
+ $('g_ledst').textContent='Зараз індикатор: '+(st.dark&&!st.test?'погашено — ніч':st.led===1?'«світло є»':st.led===0?'«світла немає»':'нічого не показує')+(st.test?' — перевірка':'');
+ $('g_sndst').textContent=(st.busy?'Грає… ':'')+(st.last?'Востаннє: '+st.last+'. ':'')+(st.quiet?'Зараз ніч — без звуку.':'');
  $('g_infLost').textContent=st.lost?'На Сторожі свій звук: '+(st.lost/16000).toFixed(1)+' с':'Свого звуку «світло зникло» ще немає';
  $('g_infBack').textContent=st.back?'На Сторожі свій звук: '+(st.back/16000).toFixed(1)+' с':'Свого звуку «світло є» ще немає'}
 let curSig=null;

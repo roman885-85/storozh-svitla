@@ -344,6 +344,7 @@ static void hSigGet() {
        ",\"lcdVop\":" + String(S.lcdVop) + ",\"lcdBri\":" + String(S.lcdBri) + ",\"lcdNight\":" + String(S.lcdNight) +
        ",\"lcdBias\":" + String(S.lcdBias) + ",\"lcdMq\":" + String(S.lcdMq) +
        ",\"lcdFx\":" + (S.lcdFx ? "true" : "false") + ",\"lcdFxSec\":" + String(S.lcdFxSec) + ",\"lcdAnnMin\":" + String(S.lcdAnnMin) +
+       ",\"nLedOff\":" + b(S.nLedOff) + ",\"nLcdOff\":" + b(S.nLcdOff) +
        ",\"st\":" + sigJson() + "}");
 }
 static void hSigPost() {
@@ -362,7 +363,7 @@ static void hSigPost() {
   auto flag = [&](const char* k, bool& dst) { if (srv.hasArg(k)) dst = srv.arg(k) == "1"; };
   long v;
   flag("ledOn", n.ledOn); flag("ledLow", n.ledLow); flag("sndLost", n.sndLost); flag("sndBack", n.sndBack);
-  flag("sndBoot", n.sndBoot); flag("qOn", n.qOn);
+  flag("sndBoot", n.sndBoot); flag("qOn", n.qOn); flag("nLedOff", n.nLedOff); flag("nLcdOff", n.nLcdOff);
   v = n.ledG;     if (!num("ledG", 0, 39, "Вивід зеленого", v)) return fail(err);      n.ledG = v;
   v = n.ledR;     if (!num("ledR", 0, 39, "Вивід червоного", v)) return fail(err);     n.ledR = v;
   v = n.ledBri;   if (!num("ledBri", 1, 100, "Яскравість, %", v)) return fail(err);    n.ledBri = v;
@@ -372,8 +373,8 @@ static void hSigPost() {
   v = n.dacPin;   if (!num("dacPin", 25, 26, "Вивід ЦАП", v)) return fail(err);        n.dacPin = v;
   v = n.sndVol;   if (!num("sndVol", 0, 100, "Гучність, %", v)) return fail(err);      n.sndVol = v;
   v = n.sndRep;   if (!num("sndRep", 1, 10, "Повторів", v)) return fail(err);          n.sndRep = v;
-  v = n.qFrom;    if (!num("qFrom", 0, 23, "Тиша з (година)", v)) return fail(err);    n.qFrom = v;
-  v = n.qTo;      if (!num("qTo", 0, 23, "Тиша до (година)", v)) return fail(err);     n.qTo = v;
+  v = n.qFrom;    if (!num("qFrom", 0, 23, "Ніч з (година)", v)) return fail(err);    n.qFrom = v;
+  v = n.qTo;      if (!num("qTo", 0, 23, "Ніч до (година)", v)) return fail(err);     n.qTo = v;
   v = n.srcLost;  if (!num("srcLost", 0, 2, "Звук «світло зникло»", v)) return fail(err); n.srcLost = v;
   v = n.srcBack;  if (!num("srcBack", 0, 2, "Звук «світло є»", v)) return fail(err);   n.srcBack = v;
   flag("stripAnim", n.stripAnim);

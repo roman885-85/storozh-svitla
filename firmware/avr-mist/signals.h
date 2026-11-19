@@ -8,10 +8,10 @@ void   sigBegin();
 void   sigReload();                          // після збереження налаштувань
 void   sigLoop(int gridSt, int lineSt);      // зі звичайного циклу: індикатор (1 — є, 0 — немає, -1 — невідомо); лінія — для генератора
 void   sigEvent(int from, int to);           // зміна міста: звук
-bool   sigTest(const String& what, int vol = -1);   // green | red | off | flash | wave | lost | back; vol — гучність перевірки з повзунка, -1 — збережена
+bool   sigTest(const String& what, int vol = -1);   // green | red | off | flash | wave | night | lost | back; vol — гучність перевірки з повзунка, -1 — збережена
 String sigJson();
 bool   sigPinOk(int pin);                    // вивід можна займати
-bool   sigQuietNow();                        // зараз «тиша вночі» (для підсвітки дисплея, 1.0.22)
+bool   sigNightNow();                        // зараз нічні години (1.0.28: світлодіоди, стрічка й підсвітка дисплея — гаснуть чи тьмяніють)
 bool   sigMelodyOk(const String& m, String& err);
 bool   sigPatternOk(const String& p, String& err);
 //  Свій звук для динаміка: сирі 8-бітні вибірки 16 кГц моно — сторінка сама перетворює будь-який файл.

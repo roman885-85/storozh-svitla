@@ -111,6 +111,8 @@ void settingsLoad() {
   S.lcdFx    = gb("lcdFx", true);
   S.lcdFxSec = gu("lcdFxSec", 30);
   S.lcdAnnMin = gu("lcdAnnMin", 10);
+  S.nLedOff  = gb("nLedOff", true);
+  S.nLcdOff  = gb("nLcdOff", true);
   S.beacons  = gs("bcn", "");
   if (ok) p.end();
 }
@@ -208,6 +210,8 @@ bool settingsSave() {
   p.putBool("lcdFx", S.lcdFx);
   p.putUShort("lcdFxSec", S.lcdFxSec);
   p.putUShort("lcdAnnMin", S.lcdAnnMin);
+  p.putBool("nLedOff", S.nLedOff);
+  p.putBool("nLcdOff", S.nLcdOff);
   p.putString("bcn", S.beacons);
   p.end();
   return true;

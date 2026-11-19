@@ -19,6 +19,7 @@ static void pinIdle(int p) {                    // вивід, що звільн
 }
 
 static bool quietNow();
+static bool nightNow();
 
 // ---------- адресна стрічка WS2812B (1.0.13) ----------
 //  Один вивід — будь-які кольори. Рекомендовано відрізок на 8 світлодіодів: видно здалеку, при 30 % ≈ 0,2 А від ДБЖ.
@@ -29,6 +30,7 @@ static rmt_data_t* stripBuf = nullptr;
 static uint8_t gam[256];                          // гама 2,2 — щоб «дихання» йшло рівно, а не стрибками внизу
 static volatile int animType = 0;                 // 1 — спалахи «зникло», 2 — хвиля «з'явилось»
 static volatile int64_t animStart = 0;
+static volatile bool animTest = false;            // 1.0.28: анімацію запустила кнопка перевірки — світить і вночі
 static int64_t stripNext = 0;
 static void stripFree() {
   if (stripPin >= 0) { rmtDeinit(stripPin); pinIdle(stripPin); }
@@ -78,7 +80,7 @@ static void waveLv(float* lv, uint32_t t) {
   float ph0 = (float)(t % T) / T;
   for (int i = 0; i < stripN; i++) lv[i] = 1.0f - I * (0.5f - 0.5f * cosf(TWO_PI_F * ((float)i / L - ph0)));
 }
-static void stripFrame(int mode, int line) {
+static void stripFrame(int mode, int line, float nightK) {
   static uint8_t px[STRIP_MAX][3];
   float lv[STRIP_MAX];
   uint32_t t = millis(), col = S.colUnk;
@@ -123,7 +125,7 @@ static void stripFrame(int mode, int line) {
       else { col = S.colOn; for (int i = 0; i < stripN; i++) lv[i] = a >= (uint32_t)(i * 800 / stripN) ? 1.0f : 0.0f; }
     }
   }
-  float master = S.stripBri / 100.0f * (quietNow() ? S.stripNight / 100.0f : 1.0f);
+  float master = S.stripBri / 100.0f * nightK;
   uint8_t cr = col >> 16, cg = col >> 8, cb = col;
   uint32_t sum = 0;
   for (int i = 0; i < stripN; i++) {
@@ -148,9 +150,10 @@ static int ledG = -1, ledR = -1;
 static bool gOn = false, rOn = false, gWant = false, rWant = false;
 static int64_t testUntil = 0;
 static int testWhat = 0;                         // 1 — зелений, 2 — червоний
-static void ledOut(int pin, bool on) {
+static int ledPct = -1;                          // з якою яскравістю світять зараз, % (1.0.28: уночі — менше чи 0)
+static void ledOut(int pin, bool on, int pct) {
   if (pin < 0) return;
-  uint32_t d = on ? (uint32_t)S.ledBri * 255 / 100 : 0;
+  uint32_t d = on ? (uint32_t)pct * 255 / 100 : 0;
   ledcWrite(pin, S.ledLow ? 255 - d : d);
 }
 static void ledInit() {
@@ -158,6 +161,7 @@ static void ledInit() {
   if (ledR >= 0) { ledcDetach(ledR); pinIdle(ledR); }
   ledG = ledR = -1;
   gOn = rOn = false;
+  ledPct = -1;
   stripFree();
   if (!S.ledOn) return;
   if (S.ledType == 1) {
@@ -166,12 +170,13 @@ static void ledInit() {
   }
   if (sigPinOk(S.ledG) && ledcAttach(S.ledG, 5000, 8)) ledG = S.ledG;
   if (sigPinOk(S.ledR) && S.ledR != S.ledG && ledcAttach(S.ledR, 5000, 8)) ledR = S.ledR;
-  ledOut(ledG, false);
-  ledOut(ledR, false);
+  ledOut(ledG, false, 0);
+  ledOut(ledR, false, 0);
   if (ledG < 0 || ledR < 0) logEvent("Світлодіоди: не вдалося зайняти вивід " + String(ledG < 0 ? S.ledG : S.ledR));
 }
 static volatile int gridNow = -1;
 static volatile int ledMode = -1;               // що зараз показують світлодіоди: 1 — зелений, 0 — червоний блимає, -1 — нічого
+static volatile bool ledDark = false;           // 1.0.28: зараз ніч — індикатор погашено
 void sigLoop(int st, int line) {
   gridNow = st;
   int mode = st;                                 // 1 — зелений світить, 0 — червоний блимає, -1 — обидва згасли
@@ -179,20 +184,29 @@ void sigLoop(int st, int line) {
     if (nowUs() < testUntil) mode = testWhat == 1 ? 1 : 0;
     else testUntil = 0;
   }
+  if (!animType) animTest = false;
+  //  Ніч (1.0.28): світлодіоди й стрічка гаснуть (nLedOff) або світять на stripNight % від денної яскравості.
+  //  Перевірки зі сторінки («Показати…», «Спалахи», «Хвиля») світять і вночі — інакше вночі нічого не перевірити.
+  bool test = testUntil || (animType && animTest);
+  float nightK = (!test && nightNow()) ? (S.nLedOff ? 0.0f : S.stripNight / 100.0f) : 1.0f;
+  ledDark = S.ledOn && nightK <= 0.0f;
   ledMode = S.ledOn ? mode : -1;
   if (S.ledOn && S.ledType == 1) {
     int64_t n = nowUs();
-    if (n >= stripNext) { stripNext = n + 20000; stripFrame(mode, line); }   // 50 кадрів/с
+    if (n >= stripNext) { stripNext = n + 20000; stripFrame(mode, line, nightK); }   // 50 кадрів/с
     return;
   }
   uint16_t per = S.ledBlink < 200 ? 200 : S.ledBlink;
   //  Два світлодіоди (1.0.17): зелений світить — місто є; зелений блимає — місто є, а генератор ще працює;
   //  червоний світить — міста немає, працює генератор; червоний блимає — світла немає зовсім.
   bool ph = (millis() % per) < per / 2;
-  gWant = mode == 1 && (line == 1 ? ph : true);
-  rWant = mode == 0 && (line == 1 ? true : ph);
-  if (gWant != gOn) { ledOut(ledG, gWant); gOn = gWant; }
-  if (rWant != rOn) { ledOut(ledR, rWant); rOn = rWant; }
+  int pct = (int)lroundf(S.ledBri * nightK);
+  gWant = pct > 0 && mode == 1 && (line == 1 ? ph : true);
+  rWant = pct > 0 && mode == 0 && (line == 1 ? true : ph);
+  bool re = pct != ledPct;                       // яскравість змінилась (настала ніч чи ранок) — переписати обидва
+  ledPct = pct;
+  if (gWant != gOn || re) { ledOut(ledG, gWant, pct); gOn = gWant; }
+  if (rWant != rOn || re) { ledOut(ledR, rWant, pct); rOn = rWant; }
 }
 
 // ---------- звук: загальне ----------
@@ -202,15 +216,25 @@ static int curVol() { return playVol >= 0 ? playVol : S.sndVol; }
 static QueueHandle_t sq = nullptr;
 static volatile bool sndBusy = false, sndAbort = false;
 static char lastPlayed[64] = "";                // пише задача звуку, читає сторінка — без String, щоб без гонок
-static bool quietNow() {
-  if (!S.qOn || !clockValid()) return false;
+//  Нічні години qFrom–qTo (1.0.28): діють на світлодіоди, стрічку й підсвітку дисплея завжди, на звук — лише з qOn.
+//  Години однакові — ночі немає (раніше «з 22 до 22» означало «ніч цілодобово»). Годинника ще немає — день.
+static volatile int64_t nightDemo = 0;          // «Показати ніч» зі сторінки: до цієї миті — як уночі (15 с)
+static bool nightNow() {
+  int64_t now = nowUs();
+  if (nightDemo && now < nightDemo) return true;
+  static int64_t at = -1;                        // цикл кличе ~400 разів за секунду — годину перевіряємо раз на секунду
+  static bool v = false;
+  if (at >= 0 && now - at < 1000000) return v;
+  at = now;
+  if (S.qFrom == S.qTo || !clockValid()) return v = false;
   time_t n = time(nullptr);
   struct tm a;
   localtime_r(&n, &a);
   int h = a.tm_hour;
-  return S.qFrom < S.qTo ? (h >= S.qFrom && h < S.qTo) : (h >= S.qFrom || h < S.qTo);
+  return v = S.qFrom < S.qTo ? (h >= S.qFrom && h < S.qTo) : (h >= S.qFrom || h < S.qTo);
 }
-bool sigQuietNow() { return quietNow(); }
+static bool quietNow() { return S.qOn && nightNow(); }
+bool sigNightNow() { return nightNow(); }
 static bool waitMs(uint32_t ms) {               // false — перервано
   uint32_t t0 = millis();
   while (millis() - t0 < ms) { if (sndAbort) return false; vTaskDelay(pdMS_TO_TICKS(ms > 20 ? 10 : 1)); }
@@ -482,7 +506,7 @@ static void sndTask(void*) {
 
 void sigEvent(int from, int to) {
   if (to != 0 && to != 1) return;
-  if (from != -1 && S.ledOn && S.ledType == 1 && S.stripAnim) { animType = to == 0 ? 1 : 2; animStart = nowUs(); }
+  if (from != -1 && S.ledOn && S.ledType == 1 && S.stripAnim) { animTest = false; animType = to == 0 ? 1 : 2; animStart = nowUs(); }
   if (from == -1 && !S.sndBoot) return;          // перше визначення після запуску — без звуку (якщо не просили)
   if (to == 1) sndAbort = true;                  // світло повернулось — обірвати повтори «зникло»
   if (!S.sndType || (to == 0 && !S.sndLost) || (to == 1 && !S.sndBack)) return;
@@ -497,9 +521,11 @@ bool sigTest(const String& w, int vol) {
     testUntil = nowUs() + 8000000LL;
     return S.ledOn;
   }
-  if (w == "off") { testUntil = 0; animType = 0; return true; }
+  if (w == "off") { testUntil = 0; animType = 0; animTest = false; nightDemo = 0; return true; }
+  if (w == "night") { testUntil = 0; animType = 0; animTest = false; nightDemo = nowUs() + 15000000LL; return true; }
   if (w == "flash" || w == "wave") {
     if (!S.ledOn || S.ledType != 1) return false;
+    animTest = true;
     animType = w == "flash" ? 1 : 2;
     animStart = nowUs();
     return true;
@@ -567,7 +593,8 @@ String sigJson() {
   }
   return String("{\"led\":") + String((int)ledMode) +
          ",\"test\":" + (testUntil ? "true" : "false") + ",\"busy\":" + (sndBusy ? "true" : "false") +
-         ",\"quiet\":" + (quietNow() ? "true" : "false") + ",\"fs\":" + (fsOk ? "true" : "false") +
+         ",\"quiet\":" + (quietNow() ? "true" : "false") + ",\"night\":" + (nightNow() ? "true" : "false") +
+         ",\"dark\":" + (ledDark ? "true" : "false") + ",\"demo\":" + (nightDemo && nowUs() < nightDemo ? "true" : "false") + ",\"clock\":" + (clockValid() ? "true" : "false") + ",\"fs\":" + (fsOk ? "true" : "false") +
          ",\"lost\":" + String((unsigned)a) + ",\"back\":" + String((unsigned)b) +
          ",\"last\":\"" + jsonEsc(lastPlayed) + "\"}";
 }
