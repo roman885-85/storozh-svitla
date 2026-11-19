@@ -1,0 +1,244 @@
+/*  АВР-міст — сповіщення в Telegram про міське світло за станом АВР TOMZN TOQ7E-125/4.
+ *
+ *  ESP32 (WROOM) одночасно:
+ *   • клієнт Wi-Fi церковного роутера — вихід в інтернет і сторінка налаштувань;
+ *   • власна точка доступу для АВР і маячка; трафік АВР іде далі через NAT,
+ *     тож застосунок eWeLink працює як і раніше;
+ *   • стежить: Wi-Fi АВР живиться лише від міського вводу — АВР у мережі моста,
+ *     отже місто є; маячок (ESP32-C3 у розетці після АВР) живий — на лінії є напруга;
+ *   • шле повідомлення в Telegram і відповідає на /status.
+ *
+ *  Правило власника: у флеш пишуть лише явні дії людини — «Зберегти» на сторінці,
+ *  призначення АВР і чату, оновлення прошивки, скидання. Стан, журнал і черга — у RAM.
+ *
+ *  Збирати лише tools/build.sh: він додає -Wl,--wrap=dns_clear_cache (див. dnsfix.cpp).
+ */
+#include <Arduino.h>
+#include <WiFi.h>
+#include <esp_task_wdt.h>
+#include <esp_ota_ops.h>
+#include "settings.h"
+#include "bridge.h"
+#include "watch.h"
+#include "tg.h"
+#include "web.h"
+#include "util.h"
+#include "stats.h"
+#include "signals.h"
+#include "yasno.h"
+#include "lcd.h"
+#include "version.h"
+
+static const int RESET_BTN = 0;          // кнопка BOOT: 10 с — скинути налаштування
+static String cmdLine;
+
+static void printInfo() {
+  Serial.printf("\nСторож світла %s (збірка %s)\n", FW_VERSION, FW_BUILD);
+  Serial.printf("Мережа для АВР: «%s», пароль «%s», сторінка http://10.77.0.1\n", S.apSsid.c_str(), S.apPass.c_str());
+  Serial.printf("Сторінка: користувач admin, пароль %s\n", S.adminPass == defaultPass() ? ("«" + S.adminPass + "» (типовий)").c_str() : "заданий на сторінці");
+  if (S.staSsid.length())
+    Serial.printf("Роутер «%s»: %s\n", S.staSsid.c_str(), staUp() ? ("адреса " + staIpStr() + ", також http://avr-mist.local").c_str() : "немає зв'язку");
+  else
+    Serial.println("Роутер не налаштовано");
+  if (staUp()) Serial.printf("NAT: %s\n", natOn() ? "увімкнено, пристрої в точці мають інтернет" : "ВИМКНЕНО, пристрої в точці без інтернету");
+  Serial.printf("Стан: %s\n", statusShort().c_str());
+  Serial.println("Команди: info, state, reboot, factory-reset");
+}
+
+static void serialCmd() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\r') continue;
+    if (c != '\n') { if (cmdLine.length() < 120) cmdLine += c; continue; }
+    String l = cmdLine;
+    cmdLine = "";
+    l.trim();
+    if (l == "info") printInfo();
+    else if (l == "state") {          // те саме, що бачить сторінка, — для перевірки по кабелю
+      Serial.println(watchJson());
+      Serial.println(bridgeJson());
+      Serial.println(tgJson());
+    }
+    else if (l == "reboot") ESP.restart();
+    else if (l == "factory-reset") {
+      settingsFactoryReset();
+      webLogoutAll();
+      Serial.println("Налаштування стерто, перезапуск");
+      delay(200);
+      ESP.restart();
+    } else if (l.length()) Serial.println("Команди: info, state, reboot, factory-reset");
+  }
+}
+
+static void bootButton() {
+  static uint32_t down = 0;
+  if (digitalRead(RESET_BTN) == LOW) {
+    if (!down) down = millis();
+    else if (millis() - down > 10000) {
+      logEvent("Кнопка BOOT 10 с: налаштування стерто");
+      settingsFactoryReset();
+      webLogoutAll();
+      delay(300);
+      ESP.restart();
+    }
+  } else down = 0;
+}
+
+//  Окрема кнопка скидання пароля сторінки (1.0.15, власник: «отдельную кнопку сброса пароля входа»). Кнопка між
+//  виводом S.pwBtn і GND (внутрішня підтяжка, без резистора). Утримати 5 с — пароль сторінки стає типовим, усі входи
+//  скасовано, решта налаштувань лишається; в Telegram — «🔑 Пароль сторінки скинуто». Кнопка діє лише після того, як
+//  вивід побув відпущеним (1 с): замкнений від запуску вивід (помилка в проводах) пароль щоразу не скидатиме.
+//  Кнопка BOOT, як і раніше, 10 с — стерти все.
+static void pwButton() {
+  static int pin = -1;
+  static uint32_t down = 0, upSince = 0;
+  static bool armed = false, fired = false, told = false;
+  if (pin != (int)S.pwBtn) {
+    if (pin > 0) pinMode(pin, INPUT);
+    pin = S.pwBtn;
+    down = upSince = 0;
+    armed = fired = told = false;
+    if (pin > 0) pinMode(pin, INPUT_PULLUP);
+  }
+  if (pin <= 0) return;
+  uint32_t now = millis();
+  if (digitalRead(pin) != LOW) {
+    down = 0;
+    fired = false;
+    if (!upSince) upSince = now | 1;
+    else if (now - upSince >= 1000) armed = true;
+    return;
+  }
+  upSince = 0;
+  if (!down) down = now | 1;
+  if (fired || now - down < 5000) return;
+  if (!armed) {
+    if (!told) logEvent("Кнопка скидання пароля: GPIO" + String(pin) + " замкнений на GND від запуску — не скидаю, перевірте проводи");
+    told = true;
+    return;
+  }
+  fired = true;
+  S.adminPass = defaultPass();
+  bool ok = settingsSave();
+  webLogoutAll();
+  logEvent(ok ? "Кнопка скидання пароля 5 с: пароль сторінки став типовим, усі входи скасовано" : "Кнопка скидання пароля: не вдалося записати");
+  if (ok) tgBroadcast(nowUs(), pwResetMessage(), false, RF_SYS | C_ADMIN);
+}
+
+// ---------- сторінка має відповідати завжди (1.0.7) ----------
+//  18.11.2026, власник: «веб моста перестал работать — такого быть не должно и повторяться тоже».
+//  • Оновлення по мережі з відкатом: нова прошивка після оновлення завантажується «на перевірку» (завантажувач ESP32
+//    з відкатом увімкнено в ядрі), але ядро Arduino одразу визнавало її справною. Тепер визнаємо лише тоді, коли через
+//    хвилину роботи міст сам відкрив свою сторінку /api/ping. Упала, зависла чи сторінка мовчить 3 хв — відкат на
+//    попередню версію. Після прошивки кабелем відкату немає: там і так поруч людина з кабелем.
+//  • Звичайна робота: раз на 5 хв те саме; 3 невдачі поспіль (15 хв без сторінки) — перезапуск моста.
+extern "C" bool verifyRollbackLater() { return true; }
+static bool otaPending = false;
+static volatile int selfRes = -1;          // остання самоперевірка: -1 ще не було, 0 — сторінка не відповіла, 1 — відповіла
+static volatile uint32_t selfN = 0;        // скільки перевірок зроблено
+static void selfCheckTask(void*) {
+  vTaskDelay(pdMS_TO_TICKS(60000));
+  for (;;) {
+    bool ok = false;
+    WiFiClient c;
+    if (c.connect(IPAddress(127, 0, 0, 1), 80, 3000)) {
+      c.print("GET /api/ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+      uint32_t t0 = millis();
+      while (millis() - t0 < 8000 && c.connected() && !c.available()) vTaskDelay(pdMS_TO_TICKS(20));
+      if (c.available()) ok = c.readStringUntil('\n').startsWith("HTTP/1.1 200");
+      c.stop();
+    }
+    selfRes = ok ? 1 : 0;
+    selfN++;
+    vTaskDelay(pdMS_TO_TICKS(otaPending ? 20000 : 300000));
+  }
+}
+static void otaBegin() {
+  esp_ota_img_states_t st;
+  otaPending = esp_ota_get_state_partition(esp_ota_get_running_partition(), &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY;
+  if (otaPending) {
+    markBootAfterUpdate();
+    logEvent("Нова прошивка " FW_VERSION " на перевірці: за хвилину сторінка має відповісти, інакше — відкат");
+  }
+  xTaskCreatePinnedToCore(selfCheckTask, "selfchk", 4096, nullptr, 1, nullptr, ARDUINO_RUNNING_CORE);
+}
+static void selfGuard() {
+  static uint32_t seen = 0;
+  static int fails = 0;
+  if (otaPending) {
+    if (selfRes == 1) {
+      esp_ota_mark_app_valid_cancel_rollback();
+      otaPending = false;
+      logEvent("Нову прошивку " FW_VERSION " визнано справною: сторінка відповідає");
+    } else if (millis() > 180000) {
+      logEvent("Нова прошивка " FW_VERSION ": сторінка не відповіла за 3 хв — відкат на попередню версію");
+      delay(300);
+      esp_ota_mark_app_invalid_rollback_and_reboot();
+    }
+    return;
+  }
+  if (selfN == seen) return;
+  seen = selfN;
+  fails = selfRes == 1 ? 0 : fails + 1;
+  if (fails == 1) logEvent("Самоперевірка: сторінка не відповіла");
+  if (fails >= 3) { logEvent("Сторінка не відповідає 15 хв — перезапуск"); delay(300); ESP.restart(); }
+}
+
+static void guards() {
+  static int64_t lowSince = 0;
+  int64_t now = nowUs();
+  //  Задача Telegram зависла (запит не повертається понад 3 хв) — перезапуск.
+  if (S.tgToken.length() && staUp() && tgHeartbeatUs() && now - tgHeartbeatUs() > 180LL * 1000000) {
+    logEvent("Задача Telegram не відповідає — перезапуск");
+    delay(200);
+    ESP.restart();
+  }
+  if (tgStuck()) {
+    logEvent("Telegram не відповідає 10 хв, хоча раніше працював — перезапуск; ненадіслані повідомлення збережено");
+    delay(300);
+    ESP.restart();
+  }
+  //  Пам'ять тече — перезапуск, поки не впало саме.
+  if (ESP.getFreeHeap() < 20000) {
+    if (!lowSince) lowSince = now;
+    else if (now - lowSince > 60LL * 1000000) { logEvent("Мало пам'яті — перезапуск"); delay(200); ESP.restart(); }
+  } else lowSince = 0;
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(RESET_BTN, INPUT_PULLUP);
+  utilBegin();
+  settingsLoad();
+  statsBegin();
+  sigBegin();
+  lcdBegin();
+  logEvent(String("Запуск «Сторожа світла» ") + FW_VERSION + " (" + resetReasonText() + ")");
+  bridgeBegin();
+  watchBegin();
+  schBegin();                            // до tgBegin: задача Telegram одразу питає графік
+  tgBegin();
+  webBegin();
+  otaBegin();
+  printInfo();
+  //  Сторож основного циклу: 30 с (довше за будь-який запит сторінки).
+  esp_task_wdt_config_t wdt = { .timeout_ms = 30000, .idle_core_mask = 1, .trigger_panic = true };   // і простій ядра 0 (Wi-Fi)
+  esp_task_wdt_reconfigure(&wdt);
+  enableLoopWDT();
+}
+
+void loop() {
+  bridgeLoop();
+  watchLoop();
+  schLoop();
+  tgLoop();
+  webLoop();
+  serialCmd();
+  bootButton();
+  pwButton();
+  guards();
+  selfGuard();
+  sigLoop(watchGrid(), watchLine());
+  lcdLoop();
+  delay(2);
+}
