@@ -38,6 +38,13 @@ void statsBegin() {
   lastUs = nowUs();
   logEvent(ok ? String("Статистика світла: відновлено з пам'яті") + (R.since ? " (рахую з " + clockAt(R.since, true) + ")" : "")
               : String("Статистика світла: почато заново (пам'ять порожня — Сторож був без живлення)"));
+  if (ok) {
+    int f = sc::repairOutages(R, [](uint32_t t) { return dayOf((time_t)t); });
+    if (f) {
+      sc::seal(R);
+      logEvent("Статистика світла: виправлено записів відключень — " + String(f) + " (одне відключення, записане кількома після перезапусків)");
+    }
+  }
 }
 
 static String line(const char* name, const sc::Sum& s, bool always) {
@@ -96,8 +103,8 @@ void statsTransition(int from, int to, int64_t atUs, bool approx) {
   uint32_t lag = (uint32_t)((nowUs() - atUs) / 1000000);   // перехід визнано із затримкою — ці секунди вже в старому стані
   if (from != -1 && lag) sc::move(R, d, from, to, lag);
   uint32_t at = epochOf(atUs);
-  if (to == 0) sc::outageStart(R, dayOf(at), at, approx);
-  else if (to == 1 && from == 0) sc::outageEnd(R, at);
+  if (to == 0) sc::outageStart(R, dayOf(at), at, approx);       // 1.0.29: те саме відключення ще триває — нового не почне
+  else if (to == 1) sc::outageEnd(R, at);   // 1.0.29: і з «невідомо» (світло повернулось за час перезапуску) — інакше «триває» назавжди
   sc::seal(R);
 }
 

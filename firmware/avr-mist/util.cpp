@@ -1,4 +1,5 @@
 #include "util.h"
+#include "box.h"
 #include <esp_system.h>
 #include <sys/time.h>
 
@@ -12,6 +13,7 @@ void utilBegin() {
   logMtx = xSemaphoreCreateMutex();
   setenv("TZ", TZ_KYIV, 1);
   tzset();
+  boxBegin();                                    // 1.0.29: що лишив попередній запуск у RTC-пам'яті
 }
 
 bool clockValid() { return time(nullptr) > 1735689600; }   // пізніше 01.01.2025
@@ -98,13 +100,15 @@ bool bootAfterUpdate() { return afterUpdate; }
 
 String resetReasonText() {
   if (afterUpdate) return "оновлення прошивки";
+  String why = boxReason();                      // 1.0.29: Сторож сам записав, чому перезапускається
+  if (why.length()) return why;
   switch (esp_reset_reason()) {
-    case ESP_RST_POWERON:  return "увімкнення живлення";
-    case ESP_RST_SW:       return "програмний перезапуск";
+    case ESP_RST_POWERON:  return "увімкнення живлення (Сторож був без живлення)";
+    case ESP_RST_SW:       return "програмний перезапуск без записаної причини";
     case ESP_RST_PANIC:    return "збій програми";
     case ESP_RST_INT_WDT:
     case ESP_RST_TASK_WDT:
-    case ESP_RST_WDT:      return "спрацював сторож";
+    case ESP_RST_WDT:      return "спрацював сторож — програма зависла";
     case ESP_RST_BROWNOUT: return "просідання живлення";
     case ESP_RST_EXT:      return "кнопка скидання";
     default:               return "інша причина";
@@ -112,6 +116,10 @@ String resetReasonText() {
 }
 
 void logEvent(const String& text) {
+  boxLine(text);                                 // 1.0.29: і в «чорну скриньку» — переживе перезапуск
+  logEventLocal(text);
+}
+void logEventLocal(const String& text) {
   Serial.printf("[%s] %s\n", fmtClock(nowUs()).c_str(), text.c_str());
   if (!logMtx) return;
   xSemaphoreTake(logMtx, portMAX_DELAY);

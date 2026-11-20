@@ -19,11 +19,13 @@ static const size_t QMAX = 40;
 //  kind (1.0.21): 0 — sendMessage, 1 — editMessageText (mid), 2 — answerCallbackQuery (mk — id натискання, text — підказка).
 //  mk — розмітка кнопок під повідомленням (inline_keyboard); cat — кому (біти RF_*), щоб перерахувати одержувачів.
 struct Item { int64_t evUs; String text; long long chat; uint32_t pending; uint16_t fails; bool silent; uint8_t kb;
-              uint16_t cat = 0; uint8_t kind = 0; String mk; int32_t mid = 0; };
+              uint16_t cat = 0; uint8_t kind = 0; String mk; int32_t mid = 0;
+              uint32_t qEp = 0; int64_t qUs = 0; };   // 1.0.29: коли стало в чергу (с від 1970; мкс цього запуску, 0 — з RTC)
 struct Seen { long long id; String name; String text; int64_t us; };
 
 static std::deque<Item> q;
 static SemaphoreHandle_t qm = nullptr;
+static void stamp(Item& it) { it.qUs = nowUs(); it.qEp = clockValid() ? (uint32_t)time(nullptr) : 0; }   // 1.0.29: коли стало в чергу
 static Chat rec[MAXR];
 static int nrec = 0;
 static const int NSEEN = 10;                          // «Писали боту» — останні 10 чатів, лише в RAM
@@ -45,18 +47,25 @@ static NetworkClientSecure* cli = nullptr;
 //  (-11, відповідь не прийшла за 15 с), хоча інтернет у церкві був. Черга — лише в RAM, тож перезапуск її губив.
 //  Тепер: (1) після двох невдач поспіль — новий об'єкт з'єднання замість старого; (2) черга дзеркалиться в пам'ять RTC,
 //  що переживає перезапуск і оновлення (як облік світла); (3) Telegram працював, а тепер 10 хв мовчить — перезапуск.
+static volatile bool wakeSend = false;               // 1.0.29: Telegram знову відповів — чергу надсилати одразу, не чекати паузи
 static volatile int consecFail = 0;                   // невдач поспіль (будь-який запит: надсилання, опитування, getMe; усе, крім 200)
 static volatile int64_t lastAnyOkUs = 0, failSinceUs = 0, lastRespUs = 0;   // lastRespUs — будь-яка відповідь HTTP, навіть 502
+//  1.0.29: рукостискання TLS у ядрі типово чекає до 120 с — на поганому інтернеті задача стояла хвилинами. Тепер 15 с.
+static NetworkClientSecure* newClient() {
+  NetworkClientSecure* c = new NetworkClientSecure();
+  c->setCACert(TG_ROOT_CA);
+  c->setHandshakeTimeout(15);
+  return c;
+}
 static void resetClient(bool log) {
   if (cli) { cli->stop(); delete cli; }
-  cli = new NetworkClientSecure();
-  cli->setCACert(TG_ROOT_CA);
+  cli = newClient();
   if (log) logEvent("Telegram: з'єднання не відповідає — створюю нове");
 }
 
 struct RtcQ { uint32_t magic, len, crc; uint8_t buf[3072]; };
 RTC_NOINIT_ATTR static RtcQ RQ;                       // після stats.cpp у збірці — адреса обліку світла не зсувається
-static const uint32_t RQ_MAGIC = 0x31514754;          // «TGQ1»
+static const uint32_t RQ_MAGIC = 0x32514754;          // «TGQ2» (1.0.29: + коли стало в чергу; старий формат «TGQ1» відкидається)
 //  Під qm. Час події (%T) вписується в текст одразу: після перезапуску лічильник мікросекунд починається з нуля.
 static void rtcSave() {
   size_t used = 0;
@@ -64,13 +73,14 @@ static void rtcSave() {
     if (it.kind || it.mk.length()) continue;          // правки й відповіді на кнопки після перезапуску вже не потрібні
     String t = it.text;
     if (clockValid()) t.replace("%T", fmtClock(it.evUs));
-    size_t L = t.length(), need = 16 + L;
+    size_t L = t.length(), need = 20 + L;
     if (L > 2000 || used + need > sizeof RQ.buf) break;
     uint8_t* e = RQ.buf + used;
     e[0] = L & 0xFF; e[1] = L >> 8; e[2] = it.silent; e[3] = it.kb;
     memcpy(e + 4, &it.pending, 4);
     memcpy(e + 8, &it.chat, 8);
-    memcpy(e + 16, t.c_str(), L);
+    memcpy(e + 16, &it.qEp, 4);
+    memcpy(e + 20, t.c_str(), L);
     used += need;
   }
   RQ.len = used;
@@ -81,12 +91,14 @@ static int rtcRestore() {                             // під qm, до зап�
   if (RQ.magic != RQ_MAGIC || RQ.len > sizeof RQ.buf || RQ.crc != esp_rom_crc32_le(0, RQ.buf, RQ.len)) { RQ.magic = 0; return 0; }
   size_t used = 0;
   int n = 0;
-  while (used + 16 <= RQ.len) {
+  while (used + 20 <= RQ.len) {
     const uint8_t* e = RQ.buf + used;
     size_t L = e[0] | (e[1] << 8);
-    if (used + 16 + L > RQ.len) break;
+    if (used + 20 + L > RQ.len) break;
     Item it;
-    it.text.concat((const char*)(e + 16), L);
+    it.text.concat((const char*)(e + 20), L);
+    memcpy(&it.qEp, e + 16, 4);
+    it.qUs = 0;
     it.silent = e[2];
     it.kb = e[3];
     memcpy(&it.pending, e + 4, 4);
@@ -94,7 +106,7 @@ static int rtcRestore() {                             // під qm, до зап�
     it.evUs = nowUs() + n;                            // %T уже вписано; +n — щоб записи черги відрізнялись
     it.fails = 0;
     if (q.size() < QMAX) { q.push_back(it); n++; }
-    used += 16 + L;
+    used += 20 + L;
   }
   return n;
 }
@@ -104,20 +116,9 @@ static std::deque<In> inbox;                          // вхідні від з�
 
 int64_t tgHeartbeatUs() { return hbUs; }
 
-//  Telegram у цьому запуску вже відповідав, а тепер 10 хв не відповідає зовсім (жодної відповіді HTTP), хоча роутер на
-//  зв'язку й черга не порожня —
-//  перезапуск (guards() у скетчі). Черга в RTC переживе його. Коли ж Telegram від запуску ні разу не відповів (немає
-//  інтернету), перезапуск не допоможе — і повторюватись не буде.
-bool tgStuck() {
-  int64_t now = nowUs();
-  if (!staUp() || consecFail < 3 || !lastAnyOkUs || !failSinceUs || now - failSinceUs < 10LL * 60 * 1000000) return false;
-  //  Telegram хоч якось відповідає (502, 429…) — зв'язок у Сторожа є, збій у Telegram: перезапуск не допоможе (18.11 16:18–16:30)
-  if (lastRespUs > failSinceUs && now - lastRespUs < 10LL * 60 * 1000000) return false;
-  xSemaphoreTake(qm, portMAX_DELAY);
-  bool pending = !q.empty();
-  xSemaphoreGive(qm);
-  return pending;
-}
+//  1.0.18–1.0.28 тут був tgStuck(): «Telegram 10 хв мовчить, черга не порожня — перезапуск». 20.11.2026 о 16:19 він
+//  перезапустив Сторож через секунду після «Зникло міське світло»: інтернету в церкві не було, а перезапуск його не
+//  повертає. Прибрано (1.0.29): черга чекає в RTC, завислий клієнт замінює resetClient().
 
 //  Під qm. Кому з одержувачів іде повідомлення цього виду (1.0.21).
 static uint32_t maskFor(uint16_t cat) {
@@ -171,6 +172,7 @@ bool tgBroadcast(int64_t evUs, const String& text, bool silent, uint16_t cat) {
       if (q.size() >= QMAX) { q.pop_front(); dropped++; }
       Item it{evUs, text, 0, m, 0, silent, 0};
       it.cat = cat;
+      stamp(it);
       q.push_back(it);
       queued = true;
       rtcSave();
@@ -183,6 +185,7 @@ bool tgBroadcast(int64_t evUs, const String& text, bool silent, uint16_t cat) {
 
 //  Повідомлення з кнопками під ним, правка свого повідомлення, відповідь на натискання (1.0.21).
 static void qPush(Item&& it) {
+  stamp(it);
   xSemaphoreTake(qm, portMAX_DELAY);
   if (q.size() >= QMAX) { q.pop_front(); dropped++; }
   q.push_back(std::move(it));
@@ -207,7 +210,9 @@ static void answerCb(const String& cbId, const String& toast) {
 void tgReply(long long chat, const String& text, uint8_t kb) {
   xSemaphoreTake(qm, portMAX_DELAY);
   if (q.size() >= QMAX) { q.pop_front(); dropped++; }
-  q.push_back(Item{nowUs(), text, chat, 1, 0, false, kb});
+  Item it{nowUs(), text, chat, 1, 0, false, kb};
+  stamp(it);
+  q.push_back(it);
   rtcSave();
   xSemaphoreGive(qm);
 }
@@ -256,12 +261,13 @@ static long long jNum(const String& s, const char* key, int from = 0) {
 }
 
 // ---------- запити ----------
-static int call(const String& token, const char* method, const String& body, String& resp) {
+static int call(const String& token, const char* method, const String& body, String& resp, uint32_t readMs = 15000) {
   int code = -100;
+  hbUs = nowUs();                                     // 1.0.29: задача жива — кожен запит теж крок
   {
     HTTPClient http;
     http.setConnectTimeout(8000);
-    http.setTimeout(15000);
+    http.setTimeout(readMs);
     if (http.begin(*cli, String("https://api.telegram.org/bot") + token + "/" + method)) {
       http.addHeader("Content-Type", "application/json");
       code = http.POST(body);
@@ -270,8 +276,10 @@ static int call(const String& token, const char* method, const String& body, Str
     }
   }   // деструктор HTTPClient кличе cli->stop() — лише після нього можна замінити cli
   if (code > 0) lastRespUs = nowUs();
-  //  Успіх — лише справжня відповідь 200: о 16:29 опитування отримували від api.telegram.org «502 Bad Gateway»
-  if (code == 200) {
+  //  Успіх — лише справжня відповідь 200: о 16:29 опитування отримували від api.telegram.org «502 Bad Gateway».
+  //  1.0.31: 400 — теж відповідь (перевірка «чи дійшло» правкою чекає саме її): зв'язок є.
+  if (code == 200 || code == 400) {
+    if (consecFail) wakeSend = true;
     if (consecFail >= 2) logEvent("Telegram: зв'язок відновився (після " + String(consecFail) + " невдач поспіль)");
     consecFail = 0;
     failSinceUs = 0;
@@ -308,8 +316,39 @@ static const char* KB_ADM = ",\"reply_markup\":{\"keyboard\":[[{\"text\":\"📊 
                             "[{\"text\":\"👥 Користувачі\"},{\"text\":\"📋 Журнал\"}],[{\"text\":\"🛠 Сторож\"},{\"text\":\"📣 Оголошення\"}]],\"resize_keyboard\":true,\"is_persistent\":true,\"input_field_placeholder\":\"Натисніть «📊 Стан»\"}";
 static const char* KB_HIDE = ",\"reply_markup\":{\"remove_keyboard\":true}";
 
+//  ---------- без дублів (1.0.31) ----------
+//  20.11.2026 о 16:19–16:38 Telegram приймав запити, але відповідав довше за 15 с (−11): Сторож вважав «не дійшло» й надсилав
+//  знову — власникові: «в 16.19 пришло куча сообщений об отсутствии света, вместо одного». Тепер відповіді на надсилання
+//  чекаємо 30 с, а якщо запит пішов і відповіді немає (−11, обрив, 5xx), то наступного разу спершу перевіряємо, чи
+//  повідомлення вже в чаті: правка повідомлення з наступним номером тим самим текстом. «message is not modified» — воно
+//  там, удруге не надсилаємо; «message to edit not found» — не дійшло, надсилаємо. Номери повідомлень у чаті йдуть підряд —
+//  останній відомий беремо з наших відповідей і з вхідних. Усе це — лише в задачі Telegram (без замків).
+struct MidRec { long long chat; int32_t mid; };
+static MidRec mids[24];
+static int nmid = 0;
+static void midSet(long long chat, long long mid) {
+  if (!chat || mid <= 0) return;
+  for (int i = 0; i < nmid; i++) if (mids[i].chat == chat) { if (mid > mids[i].mid) mids[i].mid = (int32_t)mid; return; }
+  if (nmid < 24) mids[nmid++] = {chat, (int32_t)mid};
+  else { memmove(mids, mids + 1, sizeof(MidRec) * 23); mids[23] = {chat, (int32_t)mid}; }
+}
+static int32_t midGet(long long chat) { for (int i = 0; i < nmid; i++) if (mids[i].chat == chat) return mids[i].mid; return 0; }
+struct Probe { long long chat; uint32_t key; int32_t base; String text; String mk; };
+static Probe probes[MAXR + 2];
+static int nprobe = 0;
+static void probeAdd(long long chat, uint32_t key, int32_t base, const String& text, const String& mk) {
+  if (nprobe == MAXR + 2) { for (int i = 1; i < nprobe; i++) probes[i - 1] = probes[i]; nprobe--; }
+  probes[nprobe++] = {chat, key, base, text, mk};
+}
+static void probeDrop(int i) { for (int k = i + 1; k < nprobe; k++) probes[k - 1] = probes[k]; nprobe--; }
+static uint32_t itemKey(const Item& it) {
+  uint32_t h = 2166136261u ^ (uint32_t)it.evUs ^ (uint32_t)(it.evUs >> 32);
+  for (size_t i = 0; i < it.text.length(); i++) h = (h ^ (uint8_t)it.text[i]) * 16777619u;
+  return h;
+}
+
 static bool sendOne(const String& token, long long chat, const String& text, bool silent, uint8_t kb, bool& permanent, bool plain = false,
-                    const String& mk = String()) {
+                    const String& mk = String(), int* outCode = nullptr) {
   permanent = false;
   //  1.0.6: оформлення HTML (жирний заголовок). Не прийняв розмітку («can't parse entities») — той самий текст
   //  без неї, щоб повідомлення не загубилось.
@@ -321,14 +360,16 @@ static bool sendOne(const String& token, long long chat, const String& text, boo
            ",\"link_preview_options\":{\"is_disabled\":true}}";
   };
   String resp;
-  int code = call(token, "sendMessage", body(!plain), resp);   // 1.0.18: не йде 6 разів — простим текстом
+  int code = call(token, "sendMessage", body(!plain), resp, 30000);   // 1.0.18: не йде 6 разів — простим текстом; 1.0.31: чекати 30 с
   //  1.0.8: Telegram відхилив повідомлення (400) не через хибний чат — розмітку, кнопку чи щось інше з оформлення.
   //  Повідомлення про світло важливіше за вигляд: те саме найпростішим запитом, без оформлення й кнопки.
   if (code == 400 && resp.indexOf("chat not found") < 0) {
     logEvent("Telegram не прийняв оформлене повідомлення (" + jStr(resp, "\"description\":\"") + ") — надсилаю простим текстом");
-    code = call(token, "sendMessage", body(false), resp);
+    code = call(token, "sendMessage", body(false), resp, 30000);
   }
+  if (outCode) *outCode = code;
   if (code == 200 && resp.indexOf("\"ok\":true") >= 0) {
+    midSet(chat, jNum(resp, "\"message_id\":"));
     long long d = jNum(resp, "\"date\":");
     if (d > 0) clockFromEpoch((time_t)d, "відповіддю Telegram");
     xSemaphoreTake(qm, portMAX_DELAY);
@@ -345,6 +386,48 @@ static bool sendOne(const String& token, long long chat, const String& text, boo
     if (ra > 0 && ra < 300) vTaskDelay(pdMS_TO_TICKS(ra * 1000));
   }
   return false;
+}
+
+//  1 — повідомлення в чаті (надіслано зараз або дійшла попередня спроба), 0 — ні (пізніше ще раз).
+static int verifyDelivered(const String& token, const Probe& p) {
+  for (int k = 1; k <= 3; k++) {
+    String body = "{\"chat_id\":" + String(p.chat) + ",\"message_id\":" + String(p.base + k) + ",\"text\":\"" + jsonEsc(p.text) +
+                  "\",\"parse_mode\":\"HTML\",\"link_preview_options\":{\"is_disabled\":true}" +
+                  (p.mk.length() ? ",\"reply_markup\":" + p.mk : String()) + "}";
+    String resp;
+    int code = call(token, "editMessageText", body, resp);
+    if (code == 200) { midSet(p.chat, p.base + k); return 1; }
+    if (code != 400) return -1;                      // не з'ясували — пізніше
+    String d = jStr(resp, "\"description\":\"");
+    if (d.indexOf("not modified") >= 0) { midSet(p.chat, p.base + k); return 1; }
+    if (d.indexOf("not found") >= 0) return 0;      // номера ще немає — не дійшло
+    //  «message can't be edited» — повідомлення людини з цим номером: дивимось наступний
+  }
+  return 0;
+}
+static int deliver(const String& token, long long chat, const String& text, bool silent, uint8_t kb, bool& perm, bool plain,
+                   const String& mk, uint32_t key) {
+  perm = false;
+  for (int i = 0; i < nprobe; i++) {
+    if (probes[i].chat != chat || probes[i].key != key) continue;
+    int v = verifyDelivered(token, probes[i]);
+    if (v < 0) return 0;                             // перевірити не вдалося — пізніше, і вдруге не надсилаємо
+    probeDrop(i);
+    if (v == 1) {
+      logEvent("Telegram, чат " + String(chat) + ": попередня спроба таки дійшла — удруге не надсилаю");
+      return 1;
+    }
+    logEvent("Telegram, чат " + String(chat) + ": попередня спроба не дійшла — надсилаю");
+    break;
+  }
+  int32_t before = midGet(chat);
+  int code = 0;
+  if (sendOne(token, chat, text, silent, kb, perm, plain, mk, &code)) return 1;
+  //  Запит пішов, а відповіді немає — могло й дійти
+  bool maybe = code == HTTPC_ERROR_READ_TIMEOUT || code == HTTPC_ERROR_CONNECTION_LOST || code >= 500;
+  if (maybe && before > 0) probeAdd(chat, key, before, text, mk);
+  else if (maybe) logEvent("Telegram, чат " + String(chat) + ": відповіді немає, а номерів повідомлень цього чату ще не знаю — перевірити не зможу");
+  return 0;
 }
 
 static bool editOne(const String& token, long long chat, int32_t mid, const String& text, const String& mk, bool& perm) {
@@ -511,6 +594,7 @@ int tgAnnounce(const String& text, const String& by, const long long* ids, int n
     if (q.size() >= QMAX) { q.pop_front(); dropped++; }
     Item it{now, msg, 0, m, 0, silent, 0};
     it.cat = 0;
+    stamp(it);
     q.push_back(it);
     rtcSave();
   } else n = 0;
@@ -744,6 +828,7 @@ static void poll(const String& token) {
         m.mid = (int32_t)jNum(seg, "\"message_id\":", ms);
         int ch = seg.indexOf("\"chat\":{", ms);
         if (ch >= 0) m.chat = jNum(seg, "\"id\":", ch);
+        midSet(m.chat, m.mid);                       // 1.0.31: номер у чаті щонайменше такий
       }
       m.text = jStr(seg, "\"data\":\"", cq);
       m.date = 0;
@@ -770,6 +855,7 @@ static void poll(const String& token) {
       String text = jStr(seg, "\"text\":\"", ce);
       long long date = jNum(seg, "\"date\":", ce);
       if (chat) {
+        midSet(chat, jNum(seg, "\"message_id\":"));   // 1.0.31: номери в чаті — для перевірки «чи дійшло»
         xSemaphoreTake(qm, portMAX_DELAY);
         if (inbox.size() < 20) {
           In m{chat, name, text, date};
@@ -881,8 +967,7 @@ static void sendPhoto(const String& token) {
 }
 
 static void task(void*) {
-  cli = new NetworkClientSecure();
-  cli->setCACert(TG_ROOT_CA);
+  cli = newClient();
   int64_t nextPoll = 0, nextSend = 0;
   int backoff = 5;
   for (;;) {
@@ -894,6 +979,7 @@ static void task(void*) {
     if (!staUp()) { vTaskDelay(pdMS_TO_TICKS(1000)); continue; }
     if (!token.length()) { schNetStep(); vTaskDelay(pdMS_TO_TICKS(1000)); continue; }   // графік потрібен і без бота (сторінка)
     int64_t now = nowUs();
+    if (wakeSend) { wakeSend = false; nextSend = 0; backoff = 5; }
     if (now >= nextSend) {
       Item it;
       bool have = false;
@@ -912,6 +998,12 @@ static void task(void*) {
       if (have) {
         String text = it.text;
         text.replace("%T", fmtClock(it.evUs));
+        //  1.0.29 (власник: «ответа нет — жди пока появится и тогда отправка сообщения с поправкой на время и задержку из-за
+        //  недоступности»): час події вже в тексті; що надсилаємо пізно — кажемо, на скільки й чому.
+        if (it.kind == 0) {
+          int64_t late = it.qEp && clockValid() ? (int64_t)time(nullptr) - it.qEp : it.qUs ? (nowUs() - it.qUs) / 1000000 : 0;
+          if (late >= 120) text += "\n<i>⏳ Надіслано із запізненням на " + fmtDur(late) + ": Telegram був недоступний</i>";
+        }
         uint32_t pend = it.pending;
         bool ok = true, perm = false;
         bool night = nightNow();
@@ -924,17 +1016,17 @@ static void task(void*) {
           int f = flagsOf(it.chat);
           uint8_t kb = it.kb == 1 ? (f >= 0 && (f & RF_ADMIN) ? 3 : f >= 0 ? 1 : 0) : it.kb;   // кнопки — лише одержувачам
           bool sil = it.silent || (f >= 0 && (f & RF_NIGHT) && night);
-          if (sendOne(token, it.chat, text, sil, kb, perm, it.fails >= 6, it.mk) || perm) pend = 0; else ok = false;
+          if (deliver(token, it.chat, text, sil, kb, perm, it.fails >= 6, it.mk, itemKey(it)) == 1 || perm) pend = 0; else ok = false;
         } else {
           for (int i = 0; i < nr && ok; i++) {
             if (!(pend & (1u << i))) continue;
             bool sil = it.silent || ((r[i].fl & RF_NIGHT) && night);   // 1.0.21: уночі без звуку — кому так зручніше
-            if (sendOne(token, r[i].id, text, sil, (r[i].fl & RF_ADMIN) ? 3 : 1, perm, it.fails >= 6) || perm) pend &= ~(1u << i); else ok = false;
+            if (deliver(token, r[i].id, text, sil, (r[i].fl & RF_ADMIN) ? 3 : 1, perm, it.fails >= 6, String(), itemKey(it)) == 1 || perm) pend &= ~(1u << i); else ok = false;
           }
         }
         xSemaphoreTake(qm, portMAX_DELAY);
         if (!q.empty() && q.front().evUs == it.evUs && q.front().text == it.text) {
-          if (!pend) q.pop_front();
+          if (!pend) { q.pop_front(); nprobe = 0; }        // надіслано всім — перевірки для нього не потрібні
           else {
             q.front().pending = pend;
             q.front().fails++;                          // повідомлення не викидаємо: надійде, щойно Telegram відповість

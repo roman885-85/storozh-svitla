@@ -16,8 +16,10 @@ when to start and stop the generator.
 
 The TOMZN TOQ7E ATS (eWeLink app) powers its Wi-Fi from the **mains** input only. Storozh — an ESP32 WROOM board —
 joins the building's router and provides **its own** network just for the ATS, with NAT, so eWeLink keeps working.
-ATS present on Storozh's network — mains is on; gone — mains is off. Delays (30 s / 10 s by default) filter out short
-Wi-Fi drops, and messages carry the real moment of the event.
+ATS present on Storozh's network — mains is on; silent — mains is off. Storozh pings the ATS every second: "mains off"
+after 12 s of silence ("on" after 10 s online), and messages carry the real moment of the event. A link drop is not an
+outage: a live ATS that lost the link leaves the network on its own or searches for it, while a powered-off one just goes
+silent; as long as there is such a sign of life, mains is considered on.
 
 A **beacon** is an optional ESP32-C3 plugged into the generator's outlet: online means the generator is running.
 Beacons on individual lines or phases report where voltage is present.
@@ -42,7 +44,10 @@ Beacons on individual lines or phases report where voltage is present.
 - **Web settings page:** login, lockout after wrong passwords, wiring diagrams with the current pins, over-the-air
   updates with self-check and automatic rollback.
 - **Reliability:** statistics, the Telegram queue, page logins and the current state with its start time survive
-  restarts and updates (RTC memory); the device checks its own web page; it never writes flash on its own.
+  restarts and updates (RTC memory); after a restart the state is back at once. A missing internet or Telegram never
+  restarts the device: messages wait in the queue and go out as soon as Telegram answers, marked as late and without
+  duplicates (before a retry the device checks whether the message is already in the chat). It restarts itself only
+  when really stuck, recording the reason and the last log lines in a "black box". It never writes flash on its own.
 
 ## Build and flash
 

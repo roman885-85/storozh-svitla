@@ -60,25 +60,55 @@ bool findClient(const uint8_t mac[6], ApDev& out) {
   return c != nullptr;
 }
 
+//  MAC АВР для обробника подій (інша задача): копія з налаштувань, оновлюється раз на секунду в bridgeLoop
+static uint8_t avrMacC[6];
+static bool avrMacOk = false;
+static volatile uint32_t probeN = 0, probeAvrN = 0;   // запитів пошуку мережі від запуску: усіх і від АВР (для сторінки)
+
 // ---------- події Wi-Fi (потік arduino_events) ----------
 static void onWifi(arduino_event_id_t ev, arduino_event_info_t info) {
   switch (ev) {
+    //  1.0.31: живий пристрій, що втратив точку, шукає її — шле запити пошуку (probe request). Без живлення — тиша.
+    //  Тож запит від АВР, коли той не на зв'язку, = АВР під напругою = місто є. Чужі пристрої (телефони) не заносимо.
+    case ARDUINO_EVENT_WIFI_AP_PROBEREQRECVED: {
+      const uint8_t* m = info.wifi_ap_probereqrecved.mac;
+      xSemaphoreTake(mtx, portMAX_DELAY);
+      ApDev* c = findLocked(m);
+      if (!c && avrMacOk && !memcmp(m, avrMacC, 6)) c = getLocked(m);
+      if (c) { c->lastProbeUs = nowUs(); c->probeRssi = (int8_t)info.wifi_ap_probereqrecved.rssi; }
+      if (avrMacOk && !memcmp(m, avrMacC, 6)) probeAvrN++;
+      probeN++;
+      xSemaphoreGive(mtx);
+      break;
+    }
     case ARDUINO_EVENT_WIFI_AP_STACONNECTED: {
       const uint8_t* m = info.wifi_ap_staconnected.mac;
       xSemaphoreTake(mtx, portMAX_DELAY);
       ApDev* c = getLocked(m);
-      if (c) { c->assoc = true; c->assocUs = nowUs(); }
+      int64_t away = -1;
+      if (c) {
+        if (!c->assoc && c->leaveUs) away = (nowUs() - c->leaveUs) / 1000000;
+        c->assoc = true; c->assocUs = nowUs(); c->leftAlive = false;
+      }
       xSemaphoreGive(mtx);
-      logEvent("До точки під'єднався " + macToStr(m));
+      logEvent("До точки під'єднався " + macToStr(m) + (away >= 0 ? " (не було " + fmtDur(away) + ")" : String()));
       break;
     }
     case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED: {
       const uint8_t* m = info.wifi_ap_stadisconnected.mac;
       xSemaphoreTake(mtx, portMAX_DELAY);
       ApDev* c = findLocked(m);
-      if (c) { c->assoc = false; c->leaveUs = nowUs(); }
+      bool alive = false;
+      int64_t n = nowUs();
+      if (c) {
+        //  1.0.29: за мить до того відповідав на ping — живий, вийшов сам (перепідключає Wi-Fi). Без живлення пристрій
+        //  мовчить, і точка викидає його лише за 2 хв неактивності (код 4) — тоді ping давно не відповідає.
+        alive = c->lastPingOkUs && n - c->lastPingOkUs < 6000000LL;
+        c->assoc = false; c->leaveUs = n; c->leftAlive = alive; c->leaveReason = info.wifi_ap_stadisconnected.reason;
+      }
       xSemaphoreGive(mtx);
-      logEvent("Від точки від'єднався " + macToStr(m) + " (код " + String(info.wifi_ap_stadisconnected.reason) + ")");
+      logEvent("Від точки від'єднався " + macToStr(m) + " (код " + String(info.wifi_ap_stadisconnected.reason) +
+               (alive ? "; за мить до того відповідав на ping — живий, вийшов сам)" : ")"));
       break;
     }
     case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED: {
@@ -134,8 +164,8 @@ static void pingStart(uint32_t ip) {
   cfg.target_addr.type = IPADDR_TYPE_V4;
   cfg.target_addr.u_addr.ip4.addr = ip;
   cfg.count = ESP_PING_COUNT_INFINITE;
-  cfg.interval_ms = 2000;
-  cfg.timeout_ms = 1500;
+  cfg.interval_ms = 1000;      // 1.0.29: щосекунди (було 2 с) — «міста немає» за ~12 с замість ~38 с
+  cfg.timeout_ms = 900;
   cfg.task_stack_size = 3072;
   esp_ping_callbacks_t cb = {};
   cb.on_ping_success = onPingOk;
@@ -255,6 +285,7 @@ void bridgeBegin() {
   natBootOk = WiFi.AP.enableNAPT(true);    // як у 1.0.0–1.0.1; що з ним стало, звіряє natCheck() у bridgeLoop
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
   esp_wifi_set_inactive_time(WIFI_IF_AP, 120);
+  esp_wifi_set_event_mask(WIFI_EVENT_MASK_NONE);   // 1.0.31: і запити пошуку мережі (типово вимкнено) — ознака життя АВР
   curCh = ch;
   MDNS.begin("avr-mist");
   MDNS.addService("http", "tcp", 80);
@@ -295,6 +326,14 @@ void bridgeLoop() {
   static int64_t tick = 0;
   if (now - tick < 1000000) return;
   tick = now;
+  {
+    uint8_t am[6];
+    bool ok = strToMac(S.avrMac, am);
+    xSemaphoreTake(mtx, portMAX_DELAY);
+    if (ok) memcpy(avrMacC, am, 6);
+    avrMacOk = ok;
+    xSemaphoreGive(mtx);
+  }
   natCheck(now);
   prefCheck(now);
 
@@ -331,7 +370,10 @@ void bridgeLoop() {
       for (int i = 0; i < wl.num; i++)
         if (!memcmp(wl.sta[i].mac, c.mac, 6)) { found = true; c.rssi = wl.sta[i].rssi; break; }
       if (found && !c.assoc) { c.assoc = true; c.assocUs = now; }
-      if (!found && c.assoc) { c.assoc = false; c.leaveUs = now; }
+      if (!found && c.assoc) {
+        c.assoc = false; c.leaveUs = now; c.leaveReason = 0;
+        c.leftAlive = c.lastPingOkUs && now - c.lastPingOkUs < 6000000LL;
+      }
     }
     for (int i = 0; i < wl.num; i++)
       if (!findLocked(wl.sta[i].mac)) {
@@ -393,7 +435,8 @@ String bridgeJson() {
   String o = "{\"sta\":{\"ssid\":\"" + jsonEsc(S.staSsid) + "\",\"up\":" + (gStaUp ? "true" : "false");
   if (gStaUp) o += ",\"ip\":\"" + WiFi.localIP().toString() + "\",\"rssi\":" + String(WiFi.RSSI()) + ",\"gw\":\"" + WiFi.gatewayIP().toString() + "\"" +
                     ",\"bssid\":\"" + WiFi.BSSIDstr() + "\",\"pref\":" + (onPreferred() ? "true" : "false");
-  o += "},\"ap\":{\"ssid\":\"" + jsonEsc(S.apSsid) + "\",\"ch\":" + String(curCh) + ",\"ip\":\"10.77.0.1\",\"nat\":" + String(natFlag() ? "true" : "false") + "},\"clients\":[";
+  o += "},\"ap\":{\"ssid\":\"" + jsonEsc(S.apSsid) + "\",\"ch\":" + String(curCh) + ",\"ip\":\"10.77.0.1\",\"nat\":" + String(natFlag() ? "true" : "false") +
+       ",\"probes\":" + String((unsigned)probeN) + ",\"probesAvr\":" + String((unsigned)probeAvrN) + "},\"clients\":[";
   ApDev cs[MAXC];
   int n = clientsSnapshot(cs, MAXC);
   int64_t now = nowUs();

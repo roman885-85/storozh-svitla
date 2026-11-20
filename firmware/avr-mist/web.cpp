@@ -9,6 +9,7 @@
 #include "signals.h"
 #include "yasno.h"
 #include "lcd.h"
+#include "box.h"
 #include <WebServer.h>
 #include <esp_rom_crc.h>
 #include <Update.h>
@@ -491,7 +492,8 @@ static void hSoundDel() {
   json("{\"ok\":true}");
 }
 
-static void scheduleRestart(uint32_t ms) { restartPending = true; restartAt = millis() + ms; }
+static String restartWhy;
+static void scheduleRestart(uint32_t ms, const char* why) { restartPending = true; restartAt = millis() + ms; restartWhy = why; }
 static const char* b(bool v) { return v ? "true" : "false"; }
 
 static bool tokenOk(const String& t) {
@@ -540,7 +542,7 @@ static void hSettingsGet() {
   String o = "{\"obj\":\"" + jsonEsc(S.objName) + "\",\"staSsid\":\"" + jsonEsc(S.staSsid) + "\",\"staPassSet\":" + b(S.staPass.length()) + ",\"staBssid\":\"" + jsonEsc(S.staBssid) + "\"" +
              ",\"apSsid\":\"" + jsonEsc(S.apSsid) + "\",\"tgTokenSet\":" + b(S.tgToken.length()) + ",\"tgTokenHint\":\"" + jsonEsc(hint) +
              "\",\"tgChats\":\"" + jsonEsc(S.tgChats) + "\",\"avrMac\":\"" + jsonEsc(S.avrMac) + "\",\"mayakOn\":" + b(S.mayakOn) +
-             ",\"notifyStart\":" + b(S.notifyStart) + ",\"offSec\":" + String(S.offSec) + ",\"onSec\":" + String(S.onSec) +
+             ",\"notifyStart\":" + b(S.notifyStart) + ",\"offSec\":" + String(S.offSec) + ",\"onSec\":" + String(S.onSec) + ",\"glitchSec\":" + String(S.glitchSec) +
              ",\"lineOffSec\":" + String(S.lineOffSec) + ",\"lineOnSec\":" + String(S.lineOnSec) + ",\"lineWarnSec\":" + String(S.lineWarnSec) + ",\"genRemMin\":" + String(S.genRemMin) +
              ",\"sumOn\":" + b(S.sumOn) + ",\"sumHour\":" + String(S.sumHour) +
              ",\"adminDefault\":" + b(S.adminPass == defaultPass()) + ",\"pwBtn\":" + String(S.pwBtn) +
@@ -597,8 +599,9 @@ static void hSettingsPost() {
   if (srv.hasArg("notifyStart")) n.notifyStart = srv.arg("notifyStart") == "1";
   if (srv.hasArg("sumOn")) n.sumOn = srv.arg("sumOn") == "1";
   if (srv.hasArg("sumHour")) { long h = srv.arg("sumHour").toInt(); if (h < 0 || h > 23) return fail("Година підсумку — від 0 до 23"); n.sumHour = (uint8_t)h; }
-  if (!num("offSec", n.offSec, 10, 600, "Затримка «міста немає»")) return;
+  if (!num("offSec", n.offSec, 5, 600, "Затримка «міста немає»")) return;
   if (!num("onSec", n.onSec, 3, 300, "Затримка «місто є»")) return;
+  if (!num("glitchSec", n.glitchSec, 20, 900, "Обрив зв'язку з АВР")) return;
   if (!num("lineOffSec", n.lineOffSec, 5, 600, "Затримка «лінія без напруги»")) return;
   if (!num("lineOnSec", n.lineOnSec, 3, 300, "Затримка «лінія під напругою»")) return;
   if (!num("lineWarnSec", n.lineWarnSec, 0, 3600, "Попередження про лінію")) return;
@@ -648,7 +651,7 @@ static void hSettingsPost() {
   tgReload();
   schReload();
   logEvent(wifi ? "Налаштування збережено, перезапуск для Wi-Fi" : "Налаштування збережено");
-  if (wifi) scheduleRestart(1500);
+  if (wifi) scheduleRestart(1500, "зміна Wi-Fi у налаштуваннях");
   json(String("{\"ok\":true,\"restart\":") + b(wifi) + "}");
 }
 
@@ -829,7 +832,7 @@ static void hReset() {
     settingsFactoryReset();
     sessClearAll();
     logEvent("Скидання до заводських зі сторінки (" + who + "): усі налаштування стерто, перезапуск за 10 с");
-    scheduleRestart(10000);
+    scheduleRestart(10000, "скидання до заводських зі сторінки");
     return json("{\"ok\":true,\"restart\":true}");
   }
   fail("Невідома дія");
@@ -838,7 +841,7 @@ static void hReset() {
 static void hReboot() {
   if (!auth()) return;
   logEvent("Перезапуск зі сторінки");
-  scheduleRestart(800);
+  scheduleRestart(800, "перезапуск зі сторінки");
   json("{\"ok\":true}");
 }
 
@@ -847,7 +850,7 @@ static void hUpdateDone() {
   if (!upChipOk) { srv.send(400, "text/plain; charset=utf-8", "Це прошивка не для Сторожа світла (інший чип або не прошивка)"); return; }
   bool ok = !Update.hasError();
   srv.send(ok ? 200 : 500, "text/plain; charset=utf-8", ok ? "Готово. Сторож перезапускається, сторінка повернеться за 20–30 секунд." : String("Помилка оновлення: ") + Update.errorString());
-  if (ok) scheduleRestart(1500);
+  if (ok) scheduleRestart(1500, "оновлення прошивки");
 }
 
 static void hUpload() {
@@ -937,9 +940,5 @@ void webBegin() {
 
 void webLoop() {
   srv.handleClient();
-  if (restartPending && (int32_t)(millis() - restartAt) >= 0) {
-    logEvent("Перезапуск Сторожа");
-    delay(200);
-    ESP.restart();
-  }
+  if (restartPending && (int32_t)(millis() - restartAt) >= 0) restartWith(restartWhy, true);   // дія людини
 }

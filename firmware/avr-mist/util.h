@@ -22,6 +22,7 @@ bool   strToMac(const String& s, uint8_t m[6]);
 String resetReasonText();
 void   markBootAfterUpdate();      // 1.0.25: цей запуск — одразу після оновлення прошивки по мережі (нова версія на перевірці)
 bool   bootAfterUpdate();
-void   logEvent(const String& text);  // журнал подій — лише в RAM
+void   logEvent(const String& text);  // журнал подій — у RAM; 1.0.29: останні рядки ще й у RTC («чорна скринька», box.h)
+void   logEventLocal(const String& text);   // лише в RAM — для рядків, що вже прийшли зі «скриньки»
 String logJson(int maxN);
 String logText(int maxN, size_t maxLen);   // «📋 Журнал» у боті (1.0.21): нові згори, HTML-безпечно

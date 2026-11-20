@@ -77,7 +77,12 @@ inline void move(Data& d, int32_t day, int from, int to, uint32_t sec) {
   a -= sec;
   b += sec;
 }
-inline void outageStart(Data& d, int32_t day, uint32_t start, bool approx) {
+//  1.0.29: попереднє відключення ще не закінчилось (світла «є» між ними не бачили) — це те саме відключення, не нове.
+//  До 1.0.27 кожен перезапуск під час відключення відкривав нове «з ≥ …», а старе лишалось «триває» назавжди: 19.11 —
+//  три записи на одне відключення, у підсумках «відключень 4» замість 2. false — нове не почато.
+inline bool outageOpen(const Data& d) { return d.outN && d.outs[(d.outHead + NO - 1) % NO].end == 0; }
+inline bool outageStart(Data& d, int32_t day, uint32_t start, bool approx) {
+  if (outageOpen(d)) return false;
   OutRec& o = d.outs[d.outHead];
   o.start = start;
   o.end = 0;
@@ -85,6 +90,7 @@ inline void outageStart(Data& d, int32_t day, uint32_t start, bool approx) {
   d.outHead = (uint16_t)((d.outHead + 1) % NO);
   if (d.outN < NO) d.outN++;
   dayRec(d, day).outs++;
+  return true;
 }
 inline void outageEnd(Data& d, uint32_t end) {
   if (!d.outN) return;
@@ -96,6 +102,38 @@ inline const OutRec* outage(const Data& d, int i) {
   if (i < 0 || i >= d.outN) return nullptr;
   return &d.outs[(d.outHead + NO - 1 - i) % NO];
 }
+//  1.0.29: лад у записах, що лишились від старих версій. Іти від давнього до нового: відключення «триває», а за ним є
+//  новіше. Новіше з «≥» (почате перезапуском, не справжнім зникненням) — те саме відключення: злити (кінець — його кінець)
+//  і відняти з лічильника того дня. Новіше точне — старе закінчилось раніше, коли — невідомо: кінець — початок новішого.
+//  dayOf — номер дня за місцевим часом (у прошивці — з поясом Києва). Повертає, скільки записів виправлено.
+template <class DayOf> inline int repairOutages(Data& d, DayOf dayOf) {
+  OutRec a[NO];
+  int n = d.outN, fixes = 0;
+  for (int i = 0; i < n; i++) a[i] = d.outs[(d.outHead + NO - n + i) % NO];   // від давнього
+  int w = 0;
+  for (int i = 0; i < n; i++) {
+    if (w && a[w - 1].end == 0) {
+      OutRec& prev = a[w - 1];
+      if (a[i].approx) {
+        prev.end = a[i].end;
+        DayRec& r = dayRec(d, dayOf(a[i].start));
+        if (r.outs) r.outs--;
+        fixes++;
+        continue;                                   // злито — новішого запису більше немає
+      }
+      prev.end = a[i].start > prev.start ? a[i].start : prev.start;
+      fixes++;
+    }
+    a[w++] = a[i];
+  }
+  if (!fixes) return 0;
+  memset(d.outs, 0, sizeof d.outs);
+  for (int i = 0; i < w; i++) d.outs[i] = a[i];
+  d.outN = (uint16_t)w;
+  d.outHead = (uint16_t)(w % NO);
+  return fixes;
+}
+
 struct Sum { uint32_t on, off, unk, outs; };
 inline Sum sum(const Data& d, int32_t fromDay, int32_t toDay) {
   Sum s = {0, 0, 0, 0};

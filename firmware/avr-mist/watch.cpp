@@ -8,6 +8,7 @@
 #include "yasno.h"
 #include "version.h"
 #include "lcd.h"
+#include "box.h"
 #include "rtc_watch.h"
 #include <WiFi.h>
 #include <WiFiUdp.h>
@@ -30,13 +31,15 @@ static bool lhas[MAXB];
 static int64_t lbatchUs = 0;                       // коли перша зміна на лініях чекає; 0 — нічого не чекає
 static bool rwGridTried = false, rwLineTried = false;  // відновлення з RTC — лише при першому визначенні після запуску
 static bool rwGridSame = false;                         // місто після перезапуску — як і до нього (повідомлення про запуск — тихе)
+static bool gridChecked = true, lineChecked = true;     // 1.0.29: стан, відновлений одразу після запуску, ще не звірено з АВР/маячком
+static bool bootRestoreDone = false;
 static WiFiUDP udp;
 static int64_t bootUs = 0;
 static bool startAnnounced = false;
 static int64_t bothSince = 0, lastRemindUs = 0;     // місто є, а генератор ще працює: відколи й коли востаннє нагадували
 static int reminds = 0;
 static const int64_t BOOT_GRACE = 90LL * 1000000;    // після запуску АВР має час знайти точку
-static const int64_t PING_FRESH = 8LL * 1000000;     // ping кожні 2 с; 4 пропуски — «мовчить»
+static const int64_t PING_FRESH = 2500000;           // 1.0.29: ping щосекунди; 2 пропуски поспіль — «мовчить» (було 2 с і 8 с)
 static const int64_t JOIN_WINDOW = 15LL * 1000000;   // щойно під'єднався — ще отримує адресу
 static const int64_t BEAT_FRESH = 7LL * 1000000;     // маячок шле кожні 2 с
 static const uint16_t UDP_PORT = 47801;
@@ -230,6 +233,33 @@ static bool rwRestore(Track& t, Change& c, int8_t st, uint8_t ex, int64_t since,
   return false;
 }
 
+//  1.0.29 (власник 20.11.2026: «обновление состояния происходит долго и с лишними переходами — свет отключили, пауза,
+//  потом инициализация, потом через две минуты состояние отключенного света»). Після перезапуску стан і «відколи» з RTC
+//  ставимо одразу, щойно є годинник: дисплей, стрічка й облік не проходять через «визначається» (раніше — до 90 с).
+//  Відновлене звіряємо з тим, що бачимо: АВР з'явився — «є» підтверджено; не з'явився за 90 с — справжня зміна
+//  «Зникло» з повідомленням; так само «немає» → «Повернулось», щойно АВР на зв'язку.
+static void rwBootRestore() {
+  if (!rwUsable()) return;
+  if (avrAssigned() && grid.st == T_UNK && (RW.d.gst == T_ON || RW.d.gst == T_OFF)) {
+    grid.st = (Tri)RW.d.gst;
+    grid.since = usOfEpoch(RW.d.gsince);
+    grid.exact = RW.d.gex;
+    rwGridTried = rwGridSame = true;
+    gridChecked = false;
+    logEvent(String("Місто: «") + (grid.st == T_ON ? "є" : "немає") + "» " + (grid.exact ? "з " : "щонайменше з ") + fmtHM(grid.since) +
+             " — пам'ятав до перезапуску, звіряю з АВР");
+  }
+  if (lineEnabled() && line.st == T_UNK && (RW.d.lst == T_ON || RW.d.lst == T_OFF)) {
+    line.st = (Tri)RW.d.lst;
+    line.since = usOfEpoch(RW.d.lsince);
+    line.exact = RW.d.lex;
+    rwLineTried = true;
+    lineChecked = false;
+    logEvent(String("Генератор: «") + (line.st == T_ON ? "працює" : "не працює") + "» " + (line.exact ? "з " : "щонайменше з ") + fmtHM(line.since) +
+             " — пам'ятав до перезапуску, звіряю з маячком");
+  }
+}
+
 static void onGrid(const Change& c, bool restored = false) {
   if (!restored) statsTransition(c.from, grid.st, grid.since, !grid.exact);   // відновлено — відключення те саме, не нове
   sigEvent(c.from, grid.st);
@@ -338,17 +368,17 @@ static void checkGenRemind(int64_t now) {
 
 static void announceStart(bool afterGrace) {
   if (startAnnounced) return;
-  bool gridKnown = !avrAssigned() || grid.st != T_UNK;
-  bool lineKnown = !lineEnabled() || line.st != T_UNK;
+  bool gridKnown = !avrAssigned() || (grid.st != T_UNK && gridChecked);
+  bool lineKnown = !lineEnabled() || (line.st != T_UNK && lineChecked);
   if (!(gridKnown && lineKnown) && !afterGrace) return;
   startAnnounced = true;
   logEvent("Сторож світла увімкнувся (" + resetReasonText() + "). Зараз: " + statusShort());
-  //  Службове: без звуку, якщо світло є; без світла — зі звуком. Після оновлення прошивки (1.0.25) — завжди без звуку: стан
-  //  від оновлення не змінився, а 19.11.2026 два оновлення під час відключення двічі будили всіх «🔴 міського світла немає».
-  if (S.notifyStart)
-    tgBroadcast(bootUs, head("ℹ️", "Сторож світла увімкнувся", "%T") + "\nПричина: " + htmlEsc(resetReasonText()) +
-                            (bootAfterUpdate() ? " до " FW_VERSION : "") + "\nЗараз: " + statusIconText(),
-                grid.st == T_ON || bootAfterUpdate() || rwGridSame, RF_SYS);   // 1.0.26: стан той самий, що до перезапуску, — теж тихо
+  //  1.0.29 (власник: «в бот приходят частые отчеты о перезапуске»): лише адміністраторам, без звуку, і лише коли перезапуск
+  //  несподіваний — збій, сторож, зникнення живлення. Оновлення прошивки й перезапуск зі сторінки — дія людини: мовчимо.
+  //  Зміна світла за час перезапуску й так приходить окремим «Зникло» / «Повернулось».
+  if (S.notifyStart && !bootAfterUpdate() && !boxPlanned())
+    tgBroadcast(bootUs, head("ℹ️", "Сторож світла перезапустився", "%T") + "\nПричина: " + htmlEsc(resetReasonText()) +
+                            "\nЗараз: " + statusIconText() + "\n<i>Що було перед тим — «📋 Журнал».</i>", true, C_ADMIN);
 }
 
 void watchLoop() {
@@ -359,25 +389,73 @@ void watchLoop() {
   last = now;
   bool afterGrace = now - bootUs > BOOT_GRACE;
   Change c;
+  if (!bootRestoreDone && (clockValid() || afterGrace)) { bootRestoreDone = true; rwBootRestore(); }
 
   // --- АВР: місто ---
   uint8_t am[6];
   if (strToMac(S.avrMac, am)) {
     bool raw = false;
     ApDev cl;
-    if (findClient(am, cl) && cl.assoc) {
+    bool found = findClient(am, cl);
+    bool present = false;
+    if (found && cl.assoc) {
       bool fresh = cl.lastPingOkUs && now - cl.lastPingOkUs < PING_FRESH;
       bool joining = now - cl.assocUs < JOIN_WINDOW;
-      raw = cl.pingWorks ? (fresh || joining) : true;   // не відповідає на ping — віримо самому під'єднанню
+      present = cl.pingWorks ? (fresh || joining) : true;   // не відповідає на ping — віримо самому під'єднанню
     }
-    int64_t offUs = (int64_t)S.offSec * 1000000;
+    //  1.0.30–1.0.31 (власник: «ложные срабатывания … при недоступности облака или кратковременных обрывов связи с АВР не
+    //  должны приводить к ложным сработкам»; 20.11 о 15:20 — хибне «зникло» на ~3 хв). Ознаки життя АВР, коли він не на
+    //  зв'язку: (1) сам вийшов із точки, відповідаючи на ping за мить до того; (2) шле запити пошуку мережі вже після того,
+    //  як перестав відповідати. Без живлення немає ні того, ні того. Поки ознака свіжа (S.glitchSec від останньої) — АВР
+    //  живий, отже місто є. Справжнє зникнення — тиша: «міста немає» за S.offSec, як і було.
+    int64_t sign = 0;
+    bool byProbe = false;
+    if (found && !present) {
+      if (!cl.assoc && cl.leftAlive) sign = cl.leaveUs;
+      if (cl.lastProbeUs && cl.lastProbeUs > cl.lastPingOkUs + 1500000 && cl.lastProbeUs > sign) { sign = cl.lastProbeUs; byProbe = true; }
+    }
+    bool alive = sign && now - sign < (int64_t)S.glitchSec * 1000000;
+    raw = present || alive;
+    //  1.0.29 (власник: «скорость сработки отсутствия света … не больше 15»): «АВР мовчить N с» — від останньої відповіді,
+    //  а не від миті, коли мовчання помітили (раніше до S.offSec додавалось ще 8 с: 30 с → 38 с).
+    int64_t offUs = (int64_t)S.offSec * 1000000 - PING_FRESH;
+    if (offUs < 1000000) offUs = 1000000;
     int64_t chg = apChannelChangedUs();
     if (chg && now - chg < 180LL * 1000000 && offUs < 120LL * 1000000) offUs = 120LL * 1000000;   // точка змінила канал — АВР шукає її
+    //  1.0.29 (власник 20.11.2026: «ложные срабатывания отсутствия света при недоступности облака или кратковременных
+    //  обрывов связи с АВР не должны приводить к ложным сработкам»). Без живлення АВР замовкає: ping не відповідає, а з
+    //  точки він випадає лише за 2 хв неактивності (код 4). Коли ж АВР сам виходить із точки, відповідаючи на ping за мить
+    //  до того (18.11 так двічі, код 3, світло було), — він живий і перепідключає Wi-Fi: слабкий сигнал, недоступна хмара
+    //  eWeLink. Це обрив зв'язку, не світло: «міста немає» — лише якщо не повернувся за S.glitchSec (типово 3 хв).
+    static bool glitchSaid = false, probeSaid = false;
+    if (alive && !present) {
+      if (!glitchSaid && grid.st == T_ON && !byProbe) {
+        glitchSaid = true;
+        logEvent("АВР вийшов із мережі сам (код " + String(cl.leaveReason) + "), живий — це обрив зв'язку, не світло: чекаю, поки повернеться");
+      }
+      if (!probeSaid && byProbe) {
+        probeSaid = true;
+        logEvent("АВР не на зв'язку, але шукає мережу Сторожа (сигнал " + String(cl.probeRssi) + " дБм) — живий, отже місто є");
+      }
+    } else if (present && (glitchSaid || probeSaid)) {
+      if (grid.st == T_ON) logEvent("АВР повернувся — світло не зникало, це був обрив зв'язку");
+      glitchSaid = probeSaid = false;
+    } else if (!alive) glitchSaid = probeSaid = false;
     if (step(grid, raw, now, (int64_t)S.onSec * 1000000, offUs, afterGrace, c)) {
+      //  Момент зникнення — остання відповідь АВР (точність ~1 с), а не мить, коли помітили мовчання
+      if (grid.st == T_OFF && grid.exact && found) {
+        int64_t life = cl.lastPingOkUs > sign ? cl.lastPingOkUs : sign;   // остання ознака життя АВР
+        if (life && life < grid.since) grid.since = life;
+      }
       bool rs = rwRestore(grid, c, RW.d.gst, RW.d.gex, RW.d.gsince, rwGridTried);
       if (rs) rwGridSame = true;
+      if (!gridChecked) rwGridSame = false;      // відновлене не підтвердилось — за час перезапуску світло змінилось
+      gridChecked = true;
       onGrid(c, rs);
       rwSave();
+    } else if (!gridChecked && ((grid.st == T_ON && raw) || afterGrace)) {
+      gridChecked = true;
+      logEvent(String("Місто: «") + (grid.st == T_ON ? "є" : "немає") + "» підтверджено після перезапуску");
     }
   } else {
     grid = Track();
@@ -391,9 +469,10 @@ void watchLoop() {
     else for (int i = 0; i < nbc; i++) if (bc[i].role == 'g' && aliveB(seenFor(bc[i].mac), now)) raw = true;
     if (step(line, raw, now, (int64_t)S.lineOnSec * 1000000, (int64_t)S.lineOffSec * 1000000, afterGrace, c)) {
       bool rs = rwRestore(line, c, RW.d.lst, RW.d.lex, RW.d.lsince, rwLineTried);
+      lineChecked = true;
       onLine(c, rs);
       rwSave();
-    }
+    } else if (!lineChecked && ((line.st == T_ON && raw) || afterGrace)) lineChecked = true;
   } else {
     line = Track();
   }

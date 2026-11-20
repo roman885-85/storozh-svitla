@@ -11,6 +11,10 @@ struct ApDev {
   int64_t assocUs = 0, leaveUs = 0;
   int64_t lastPingOkUs = 0;     // 0 — ще не відповідав на ping
   bool pingWorks = false;       // хоч раз відповів на ping
+  bool leftAlive = false;       // 1.0.29: вийшов із точки сам, відповідаючи на ping за мить до того (живий — перепідключається)
+  uint16_t leaveReason = 0;     // код виходу з точки (0 — невідомо)
+  int64_t lastProbeUs = 0;      // 1.0.31: останній запит пошуку мережі (probe request) від нього — живий, шукає точку
+  int8_t probeRssi = 0;
   int8_t rssi = 0;
 };
 constexpr int MAXC = 8;

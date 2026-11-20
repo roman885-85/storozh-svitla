@@ -82,6 +82,7 @@ void schNetStep() {
   {
     NetworkClientSecure c;
     c.setCACert(YASNO_CA);
+    c.setHandshakeTimeout(15);           // 1.0.29: типово 120 с — задача Telegram (і графік у ній) стояла б хвилинами
     HTTPClient h;
     h.setConnectTimeout(8000);
     h.setTimeout(10000);

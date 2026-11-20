@@ -21,8 +21,7 @@ String  tgJson();
 #define TG_PHOTO_BOUNDARY "----avrmistPhoto7948"
 bool    tgSetPhoto(uint8_t* body, size_t len);          // забирає body (malloc); false — попередня ще надсилається
 bool    tgSetName(const String& name);                  // нова назва бота; false — попередня зміна ще триває
-int64_t tgHeartbeatUs();
-bool    tgStuck();
-int     tgHealth();
+int64_t tgHeartbeatUs();                                // останній крок задачі Telegram (1.0.29: і кожен запит)
+int     tgHealth();                                     // 1.0.22, для дисплея: 1 — працює, 0 — збій, -1 — не налаштовано
 //  Оголошення (1.0.26): усім, у кого ввімкнено сповіщення (nIds < 0), або вибраним з них; повертає, скільком поставлено в чергу
-int     tgAnnounce(const String& text, const String& by, const long long* ids, int nIds, bool silent);                                    // 1.0.22, для дисплея: 1 — працює, 0 — збій, -1 — не налаштовано                                     // 1.0.18: Telegram працював, а тепер 10 хв мовчить — час перезапуститись (черга в RTC)
+int     tgAnnounce(const String& text, const String& by, const long long* ids, int nIds, bool silent);

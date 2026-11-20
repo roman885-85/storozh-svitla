@@ -28,6 +28,7 @@
 #include "yasno.h"
 #include "lcd.h"
 #include "version.h"
+#include "box.h"
 
 static const int RESET_BTN = 0;          // кнопка BOOT: 10 с — скинути налаштування
 static String cmdLine;
@@ -59,13 +60,12 @@ static void serialCmd() {
       Serial.println(bridgeJson());
       Serial.println(tgJson());
     }
-    else if (l == "reboot") ESP.restart();
+    else if (l == "reboot") restartWith("команда reboot через порт", true);
     else if (l == "factory-reset") {
       settingsFactoryReset();
       webLogoutAll();
       Serial.println("Налаштування стерто, перезапуск");
-      delay(200);
-      ESP.restart();
+      restartWith("скидання до заводських через порт", true);
     } else if (l.length()) Serial.println("Команди: info, state, reboot, factory-reset");
   }
 }
@@ -78,8 +78,7 @@ static void bootButton() {
       logEvent("Кнопка BOOT 10 с: налаштування стерто");
       settingsFactoryReset();
       webLogoutAll();
-      delay(300);
-      ESP.restart();
+      restartWith("кнопка BOOT 10 с — скидання до заводських", true);
     }
   } else down = 0;
 }
@@ -172,8 +171,11 @@ static void selfGuard() {
       logEvent("Нову прошивку " FW_VERSION " визнано справною: сторінка відповідає");
     } else if (millis() > 180000) {
       logEvent("Нова прошивка " FW_VERSION ": сторінка не відповіла за 3 хв — відкат на попередню версію");
+      boxMark("нова прошивка " FW_VERSION " не відповіла за 3 хв — відкат", false);
       delay(300);
       esp_ota_mark_app_invalid_rollback_and_reboot();
+      otaPending = false;                  // повернулось — відкочуватись нікуди (прошивка кабелем): працюємо далі, без повторів
+      logEvent("Відкат неможливий — попередньої прошивки немає; працюю на " FW_VERSION);
     }
     return;
   }
@@ -181,27 +183,27 @@ static void selfGuard() {
   seen = selfN;
   fails = selfRes == 1 ? 0 : fails + 1;
   if (fails == 1) logEvent("Самоперевірка: сторінка не відповіла");
-  if (fails >= 3) { logEvent("Сторінка не відповідає 15 хв — перезапуск"); delay(300); ESP.restart(); }
+  if (fails >= 3) restartWith("сторінка Сторожа не відповідала 15 хв", false);
 }
 
+//  1.0.29 (власник 20.11.2026: «частые отчеты о перезапуске … нет стабильности и нет предсказуемости»). Того дня о 16:19
+//  місто зникло, повідомлення стало в чергу — і за секунду Сторож перезапустився: інтернету в церкві не було понад 10 хв, а
+//  сторож «Telegram 10 хв мовчить, а черга не порожня» (1.0.18) вважав це завислим з'єднанням. Перезапуск інтернету не
+//  повертає, зате губить журнал, будить людей «Сторож увімкнувся» й на 90 с ставить «визначається». Тому:
+//  • поганий інтернет Сторожа більше не перезапускає — повідомлення чекають у черзі (вона в RTC) і йдуть, щойно зв'язок є;
+//    завислий шифрований клієнт Telegram і так замінюється новим після двох невдач (tg.cpp);
+//  • кожне очікування мережі обмежене (з'єднання 8 с, рукостискання TLS 15 с, відповідь 15 с), тож задача Telegram не
+//    стоїть довше хвилини; перезапуск — лише якщо вона мовчить 10 хв (справді зависла);
+//  • кожен перезапуск записує причину (box.h) — після нього в журналі видно, чому, і що було перед тим.
 static void guards() {
   static int64_t lowSince = 0;
   int64_t now = nowUs();
-  //  Задача Telegram зависла (запит не повертається понад 3 хв) — перезапуск.
-  if (S.tgToken.length() && staUp() && tgHeartbeatUs() && now - tgHeartbeatUs() > 180LL * 1000000) {
-    logEvent("Задача Telegram не відповідає — перезапуск");
-    delay(200);
-    ESP.restart();
-  }
-  if (tgStuck()) {
-    logEvent("Telegram не відповідає 10 хв, хоча раніше працював — перезапуск; ненадіслані повідомлення збережено");
-    delay(300);
-    ESP.restart();
-  }
+  if (S.tgToken.length() && staUp() && tgHeartbeatUs() && now - tgHeartbeatUs() > 600LL * 1000000)
+    restartWith("задача Telegram зависла — 10 хв без жодного кроку", false);
   //  Пам'ять тече — перезапуск, поки не впало саме.
   if (ESP.getFreeHeap() < 20000) {
     if (!lowSince) lowSince = now;
-    else if (now - lowSince > 60LL * 1000000) { logEvent("Мало пам'яті — перезапуск"); delay(200); ESP.restart(); }
+    else if (now - lowSince > 60LL * 1000000) restartWith("мало пам'яті понад хвилину: вільно " + String(ESP.getFreeHeap()) + " Б", false);
   } else lowSince = 0;
 }
 
@@ -214,6 +216,7 @@ void setup() {
   sigBegin();
   lcdBegin();
   logEvent(String("Запуск «Сторожа світла» ") + FW_VERSION + " (" + resetReasonText() + ")");
+  boxReport();                           // 1.0.29: перезапуск був несподіваний — чому й що було перед тим
   bridgeBegin();
   watchBegin();
   schBegin();                            // до tgBegin: задача Telegram одразу питає графік

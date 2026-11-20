@@ -239,7 +239,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
  </div>
  <div class="card"><b>АВР</b>
   <label>MAC-адреса АВР</label><input id="f_avrMac" placeholder="aa:bb:cc:dd:ee:ff">
-  <label class="ck"><input type="checkbox" id="f_notifyStart"> Повідомляти в Telegram, коли Сторож увімкнувся</label>
+  <label class="ck"><input type="checkbox" id="f_notifyStart"> Повідомляти адміністраторам у Telegram, коли Сторож перезапустився несподівано (збій, сторож, зникало живлення) — з причиною. Після оновлення прошивки й перезапуску зі сторінки не пише</label>
  </div>
  <div class="card" id="bcncard"><b>Маячки</b> <span id="bcncnt" class="mut"></span>
   <div class="mut" style="margin-top:4px">Маячок — плата ESP32-C3 у розетці: кожні 2 секунди каже Сторожу «я тут» через мережу для АВР. Що означає його мовчання, задає роль:<br>
@@ -261,8 +261,10 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
   <div style="margin-top:10px"><button data-act="schfetch">Оновити графік зараз</button> <span id="schst" class="mut"></span></div>
   <div class="mut" style="margin-top:6px">Щоб зміни почали діяти, натисніть «Зберегти» внизу сторінки.</div></div>
  <div class="card"><b>Затримки, секунди</b>
-  <label>АВР мовчить, і це означає «міста немає»</label><input id="f_offSec" type="number" min="10" max="600">
+  <label>АВР мовчить (не відповідає) стільки секунд — «міста немає». Рекомендовано 10–15: так повідомлення приходить за 10–15 с після відключення</label><input id="f_offSec" type="number" min="5" max="600">
   <label>АВР знову в мережі, і це означає «місто є»</label><input id="f_onSec" type="number" min="3" max="300">
+  <label>Обрив зв'язку: АВР не на зв'язку, але живий — сам вийшов із мережі Сторожа, ще відповідаючи за мить до того, чи шукає її (слабкий сигнал, недоступна хмара eWeLink). Це не світло: «міста немає» — лише якщо від АВР немає жодної ознаки життя … с</label><input id="f_glitchSec" type="number" min="20" max="900">
+  <div class="mut">Без живлення АВР не виходить із мережі й нічого не шукає, а замовкає — тоді «міста немає» за першою затримкою. Кожен обрив і повернення АВР видно в «Журналі».</div>
   <label>Маячок мовчить, і це означає «генератор зупинився» чи «на лінії немає напруги»</label><input id="f_lineOffSec" type="number" min="5" max="600">
   <label>Маячок на зв'язку, і це означає «генератор працює» чи «на лінії є напруга»</label><input id="f_lineOnSec" type="number" min="3" max="300">
   <label>Місто є, а генератор ще працює: нагадувати «вимкніть генератор» кожні … хв (0 — лише раз), до 6 разів</label><input id="f_genRemMin" type="number" min="0" max="240">
@@ -405,7 +407,7 @@ let curSet=null,annAll=0;
 $('a_to').addEventListener('change',()=>$('a_who').classList.toggle('hide',$('a_to').value!=='sel'));
 async function loadSet(){
  try{const s=await j('/api/settings');curSet=s;
-  for(const k of ['obj','staSsid','staBssid','apSsid','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin'])$('f_'+k).value=s[k];
+  for(const k of ['obj','staSsid','staBssid','apSsid','avrMac','offSec','onSec','glitchSec','lineOffSec','lineOnSec','genRemMin'])$('f_'+k).value=s[k];
   $('f_notifyStart').checked=s.notifyStart;bcnReload();
   $('f_schOn').checked=!!s.schOn;$('f_schTom').checked=!!s.schTom;$('f_schDso').value=s.schDso||'3/301';$('f_schQueue').value=s.schQueue||'';$('f_schWarn').value=s.schWarn;
   $('h_staPass').textContent=s.staPassSet?'(задано)':'(не задано)';
@@ -437,7 +439,7 @@ async function loadTg(){
 }
 async function save(){
  const p=new URLSearchParams();
- for(const k of ['obj','staSsid','staBssid','staPass','apSsid','apPass','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin','adminPass'])p.append(k,$('f_'+k).value);
+ for(const k of ['obj','staSsid','staBssid','staPass','apSsid','apPass','avrMac','offSec','onSec','glitchSec','lineOffSec','lineOnSec','genRemMin','adminPass'])p.append(k,$('f_'+k).value);
  p.append('notifyStart',$('f_notifyStart').checked?'1':'0');p.append('pwBtn',$('f_pwBtn').value);
  p.append('schOn',$('f_schOn').checked?'1':'0');p.append('schTom',$('f_schTom').checked?'1':'0');p.append('schDso',$('f_schDso').value);p.append('schQueue',$('f_schQueue').value);p.append('schWarn',$('f_schWarn').value);
  try{const r=await j('/api/settings',{method:'POST',body:p});
