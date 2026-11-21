@@ -22,6 +22,7 @@ String  tgJson();
 bool    tgSetPhoto(uint8_t* body, size_t len);          // забирає body (malloc); false — попередня ще надсилається
 bool    tgSetName(const String& name);                  // нова назва бота; false — попередня зміна ще триває
 int64_t tgHeartbeatUs();                                // останній крок задачі Telegram (1.0.29: і кожен запит)
+void    tgNetPause();                                   // 1.0.32: закрити з'єднання з Telegram (перед YASNO; з задачі Telegram)
 int     tgHealth();                                     // 1.0.22, для дисплея: 1 — працює, 0 — збій, -1 — не налаштовано
 //  Оголошення (1.0.26): усім, у кого ввімкнено сповіщення (nIds < 0), або вибраним з них; повертає, скільком поставлено в чергу
 int     tgAnnounce(const String& text, const String& by, const long long* ids, int nIds, bool silent);

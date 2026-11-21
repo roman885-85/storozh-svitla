@@ -47,7 +47,9 @@ Beacons on individual lines or phases report where voltage is present.
   restarts and updates (RTC memory); after a restart the state is back at once. A missing internet or Telegram never
   restarts the device: messages wait in the queue and go out as soon as Telegram answers, marked as late and without
   duplicates (before a retry the device checks whether the message is already in the chat). It restarts itself only
-  when really stuck, recording the reason and the last log lines in a "black box". It never writes flash on its own.
+  when really stuck, recording the reason and the last log lines in a "black box". Telegram uses one long-lived
+  connection, and memory for TLS (2 × 17 KB) is reserved at boot, so on a board without PSRAM a fragmented heap no
+  longer breaks connections. It never writes flash on its own.
 
 ## Build and flash
 

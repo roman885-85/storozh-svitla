@@ -324,8 +324,10 @@ function render(d){
  row('Мережа для АВР',esc(d.net.ap.ssid)+', канал '+d.net.ap.ch+(st.up?(d.net.ap.nat?', інтернет для пристроїв є':', <b class="err">пристрої без інтернету: NAT вимкнено</b>'):''));
  const t=d.tg;let ts;
  if(!t.token)ts='бот не підключено: вкладка «Сповіщення»';else if(!t.recipients)ts='немає одержувачів';
- else if(t.lastErr&&(t.lastOkAgo==null||t.lastErrAgo<t.lastOkAgo))ts='помилка: '+esc(t.lastErr);
- else ts=t.lastOkAgo!=null?'надіслано '+ago(t.lastOkAgo)+' тому':'ще не надсилав';
+ //  1.0.32: «помилка» — лише поки зв'язку справді немає (невдачі поспіль); минулий збій — окремо, сірим
+ else if(t.fails>0)ts='<b class="err">немає зв\'язку</b>: '+esc(t.lastErr)+(t.fails>1?' ('+t.fails+' спроб поспіль)':'');
+ else{ts='працює'+(t.anyOkAgo!=null?', відповів '+ago(t.anyOkAgo)+' тому':'')+(t.lastOkAgo!=null?' · надіслано '+ago(t.lastOkAgo)+' тому':'');
+  if(t.lastErr&&t.lastErrAgo!=null&&t.lastErrAgo<6*3600)ts+=' <span class="mut">· збій '+ago(t.lastErrAgo)+' тому минув</span>'}
  if(t.queue)ts+=', у черзі '+t.queue;
  row('Telegram',ts+(t.token&&t.recipients?' · одержувачів '+t.recipients:''));
  row('Годинник',esc(d.clock));

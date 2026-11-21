@@ -9,6 +9,7 @@
 #include "version.h"
 #include "lcd.h"
 #include <NetworkClientSecure.h>
+#include "tlspool.h"
 #include <HTTPClient.h>
 #include <deque>
 #include <initializer_list>
@@ -57,10 +58,22 @@ static NetworkClientSecure* newClient() {
   c->setHandshakeTimeout(15);
   return c;
 }
+//  1.0.32 (власник: «в домашнем HA никогда подобных проблем небыло, посмотри, может что-то можно оттуда взять»). HA
+//  (python-telegram-bot) тримає з'єднання з Telegram відкритим і шле ним багато запитів. Сторож же на кожен запит (~6 на
+//  хвилину) робив нове рукопожаття TLS — щоразу шукав у подрібненій пам'яті два шматки по ~16,7 КБ. Тепер — одне з'єднання
+//  надовго (keep-alive): HTTPClient не локальний, бо його деструктор закриває з'єднання. Буфери — із запасу (tlspool.h).
+static HTTPClient* hc = nullptr;
+static void dropConn() { if (hc) { delete hc; hc = nullptr; } }   // деструктор кличе cli->stop() — буфери TLS звільнено
 static void resetClient(bool log) {
+  dropConn();
   if (cli) { cli->stop(); delete cli; }
   cli = newClient();
   if (log) logEvent("Telegram: з'єднання не відповідає — створюю нове");
+}
+//  Перед графіком YASNO: його з'єднанню потрібен той самий запас пам'яті. Та сама задача — без замків.
+void tgNetPause() {
+  dropConn();
+  if (cli) cli->stop();
 }
 
 struct RtcQ { uint32_t magic, len, crc; uint8_t buf[3072]; };
@@ -264,17 +277,29 @@ static long long jNum(const String& s, const char* key, int from = 0) {
 static int call(const String& token, const char* method, const String& body, String& resp, uint32_t readMs = 15000) {
   int code = -100;
   hbUs = nowUs();                                     // 1.0.29: задача жива — кожен запит теж крок
-  {
-    HTTPClient http;
-    http.setConnectTimeout(8000);
-    http.setTimeout(readMs);
-    if (http.begin(*cli, String("https://api.telegram.org/bot") + token + "/" + method)) {
-      http.addHeader("Content-Type", "application/json");
-      code = http.POST(body);
-      resp = code > 0 ? http.getString() : String();
-      http.end();
+  if (!hc) { hc = new HTTPClient(); hc->setReuse(true); }
+  hc->setConnectTimeout(8000);
+  hc->setTimeout(readMs);
+  if (hc->begin(*cli, String("https://api.telegram.org/bot") + token + "/" + method)) {
+    hc->addHeader("Content-Type", "application/json");
+    code = hc->POST(body);
+    resp = code > 0 ? hc->getString() : String();
+    hc->end();                                        // з'єднання лишається відкритим, якщо Telegram не сказав «закрити»
+  }
+  if (code < 0) {
+    //  1.0.32: чому — у журнал (перша невдача поспіль і кожна десята): помилка TLS і стан пам'яті
+    if (consecFail == 0 || (consecFail + 1) % 10 == 0) {
+      char eb[96] = "";
+      int te = (code == HTTPC_ERROR_CONNECTION_REFUSED && cli) ? cli->lastError(eb, sizeof eb) : 0;
+      String why = code == HTTPC_ERROR_CONNECTION_REFUSED ? (te ? "з'єднання не відкрилось: " + String(eb) + " (" + String(te) + ")"
+                                                                 : String("з'єднання не відкрилось (адреса чи TCP, без помилки TLS)"))
+                 : code == HTTPC_ERROR_READ_TIMEOUT ? String("відповіді немає за ") + String(readMs / 1000) + " с"
+                 : code == HTTPC_ERROR_TOO_LESS_RAM ? String("бракує пам'яті") : String("код ") + String(code);
+      logEvent("Telegram (" + String(method) + "): " + why + " · пам'ять: вільно " + String(ESP.getFreeHeap() / 1024) +
+               " КБ, найбільший шматок " + String(ESP.getMaxAllocHeap() / 1024) + " КБ, запас TLS зайнято " + String(tlsPoolBusy()) + "/2");
     }
-  }   // деструктор HTTPClient кличе cli->stop() — лише після нього можна замінити cli
+    dropConn();                                       // зіпсоване з'єднання вдруге не беремо
+  }
   if (code > 0) lastRespUs = nowUs();
   //  Успіх — лише справжня відповідь 200: о 16:29 опитування отримували від api.telegram.org «502 Bad Gateway».
   //  1.0.31: 400 — теж відповідь (перевірка «чи дійшло» правкою чекає саме її): зв'язок є.
@@ -379,7 +404,7 @@ static bool sendOne(const String& token, long long chat, const String& text, boo
     return true;
   }
   String e = noteErr(code, resp);
-  logEvent("Telegram, чат " + String(chat) + ": " + e);
+  if (code > 0 || consecFail <= 1 || consecFail % 10 == 0) logEvent("Telegram, чат " + String(chat) + ": " + e);   // 1.0.32: без повторів
   if (code == 400 || code == 403) permanent = true;           // хибний chat_id або бота заблоковано
   if (code == 429) {
     long long ra = jNum(resp, "\"retry_after\":");

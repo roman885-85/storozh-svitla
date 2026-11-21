@@ -119,15 +119,36 @@ void logEvent(const String& text) {
   boxLine(text);                                 // 1.0.29: і в «чорну скриньку» — переживе перезапуск
   logEventLocal(text);
 }
+//  1.0.32: у журналі — не довше 300 байтів (повідомлення Telegram цілком тут не потрібні): менше подрібнення пам'яті
+static String capped(const String& t) {
+  if (t.length() <= 300) return t;
+  size_t L = 297;
+  while (L > 0 && ((uint8_t)t[L] & 0xC0) == 0x80) L--;
+  return t.substring(0, L) + "…";
+}
 void logEventLocal(const String& text) {
   Serial.printf("[%s] %s\n", fmtClock(nowUs()).c_str(), text.c_str());
   if (!logMtx) return;
+  String c = capped(text);
   xSemaphoreTake(logMtx, portMAX_DELAY);
   evs[evHead].us = nowUs();
-  evs[evHead].text = text;
+  evs[evHead].text = c;
   evHead = (evHead + 1) % LOGN;
   if (evCount < LOGN) evCount++;
   xSemaphoreGive(logMtx);
+}
+
+//  1.0.32: один запис журналу (i-й від найновішого) — сторінка шле їх по одному, а не одним рядком на 10–20 КБ
+String logEntryJson(int i) {
+  if (!logMtx) return String();
+  int64_t now = nowUs();
+  xSemaphoreTake(logMtx, portMAX_DELAY);
+  if (i < 0 || i >= evCount) { xSemaphoreGive(logMtx); return String(); }
+  int idx = (evHead - 1 - i + LOGN) % LOGN;
+  int64_t us = evs[idx].us;
+  String x = evs[idx].text;
+  xSemaphoreGive(logMtx);
+  return "{\"t\":\"" + jsonEsc(fmtClock(us)) + "\",\"ago\":" + String((long)((now - us) / 1000000)) + ",\"x\":\"" + jsonEsc(x) + "\"}";
 }
 
 String logJson(int maxN) {

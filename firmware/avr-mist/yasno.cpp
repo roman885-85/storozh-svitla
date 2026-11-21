@@ -80,6 +80,7 @@ void schNetStep() {
   bool mon = heap_caps_monitor_local_minimum_free_size_start() == ESP_OK;
   int64_t t0 = nowUs();
   {
+    tgNetPause();                        // 1.0.32: з'єднання з Telegram звільняє запас пам'яті TLS — він потрібен тут
     NetworkClientSecure c;
     c.setCACert(YASNO_CA);
     c.setHandshakeTimeout(15);           // 1.0.29: типово 120 с — задача Telegram (і графік у ній) стояла б хвилинами
@@ -101,7 +102,7 @@ void schNetStep() {
   String err;
   if (!ok) {
     if (code == 200 && wr > 0) err = "черги " + S.schQueue + " у відповіді YASNO немає";
-    else if (code == 200) err = "відповідь YASNO обірвалась (" + String(wr) + ")";
+    else if (code == 200) err = wr == -8 ? String("бракує пам'яті, щоб прочитати відповідь (-8)") : "відповідь YASNO обірвалась (" + String(wr) + ")";
     else if (code < 0) err = "немає зв'язку з app.yasno.ua (" + String(code) + ")";
     else err = "YASNO відповів HTTP " + String(code);
   }

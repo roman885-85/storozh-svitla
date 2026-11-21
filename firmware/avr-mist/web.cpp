@@ -10,6 +10,7 @@
 #include "yasno.h"
 #include "lcd.h"
 #include "box.h"
+#include "tlspool.h"
 #include <WebServer.h>
 #include <esp_rom_crc.h>
 #include <Update.h>
@@ -532,7 +533,14 @@ static void hState() {
   srv.sendContent(",\"stats\":" + statsJson());
   srv.sendContent(",\"sig\":" + sigJson());
   srv.sendContent(",\"sch\":" + schJson());
-  srv.sendContent(",\"log\":" + logJson(60) + "}");
+  srv.sendContent(",\"tls\":" + tlsPoolJson());          // 1.0.32: запас пам'яті для TLS
+  srv.sendContent(",\"log\":[");                         // 1.0.32: по одному запису — без рядка на 10–20 КБ
+  for (int i = 0; i < 60; i++) {
+    String e = logEntryJson(i);
+    if (!e.length()) break;
+    srv.sendContent(i ? "," + e : e);
+  }
+  srv.sendContent("]}");
   srv.sendContent("");
 }
 

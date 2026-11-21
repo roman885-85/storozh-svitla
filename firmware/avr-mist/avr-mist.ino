@@ -29,6 +29,7 @@
 #include "lcd.h"
 #include "version.h"
 #include "box.h"
+#include "tlspool.h"
 
 static const int RESET_BTN = 0;          // кнопка BOOT: 10 с — скинути налаштування
 static String cmdLine;
@@ -211,6 +212,7 @@ void setup() {
   Serial.begin(115200);
   pinMode(RESET_BTN, INPUT_PULLUP);
   utilBegin();
+  tlsPoolBegin();                        // 1.0.32: запас пам'яті для TLS — до першого з'єднання
   settingsLoad();
   statsBegin();
   sigBegin();
