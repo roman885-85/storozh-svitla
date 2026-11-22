@@ -37,7 +37,6 @@ void settingsLoad() {
   S.notifyStart = gb("nStart", true);
   S.offSec      = gu("offSec", 12);     // 1.0.29: було 30 (і ще +8 с на ping) — власник: «не больше 15»
   S.onSec       = gu("onSec", 10);
-  S.glitchSec   = gu("glitchSec", 180);   // 1.0.31: від ОСТАННЬОЇ ознаки життя (вийшов живим, шукає мережу)
   S.lineOffSec  = gu("lOff", 15);
   S.lineOnSec   = gu("lOn", 10);
   S.lineWarnSec = gu("lWarn", 120);
@@ -138,7 +137,6 @@ bool settingsSave() {
   p.putBool("nStart", S.notifyStart);
   p.putUShort("offSec", S.offSec);
   p.putUShort("onSec", S.onSec);
-  p.putUShort("glitchSec", S.glitchSec);
   p.putUShort("lOff", S.lineOffSec);
   p.putBool("sumOn", S.sumOn);
   p.putUShort("sumHr", S.sumHour);

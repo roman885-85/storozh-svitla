@@ -263,8 +263,6 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
  <div class="card"><b>Затримки, секунди</b>
   <label>АВР мовчить (не відповідає) стільки секунд — «міста немає». Рекомендовано 10–15: так повідомлення приходить за 10–15 с після відключення</label><input id="f_offSec" type="number" min="5" max="600">
   <label>АВР знову в мережі, і це означає «місто є»</label><input id="f_onSec" type="number" min="3" max="300">
-  <label>Обрив зв'язку: АВР не на зв'язку, але живий — сам вийшов із мережі Сторожа, ще відповідаючи за мить до того, чи шукає її (слабкий сигнал, недоступна хмара eWeLink). Це не світло: «міста немає» — лише якщо від АВР немає жодної ознаки життя … с</label><input id="f_glitchSec" type="number" min="20" max="900">
-  <div class="mut">Без живлення АВР не виходить із мережі й нічого не шукає, а замовкає — тоді «міста немає» за першою затримкою. Кожен обрив і повернення АВР видно в «Журналі».</div>
   <label>Маячок мовчить, і це означає «генератор зупинився» чи «на лінії немає напруги»</label><input id="f_lineOffSec" type="number" min="5" max="600">
   <label>Маячок на зв'язку, і це означає «генератор працює» чи «на лінії є напруга»</label><input id="f_lineOnSec" type="number" min="3" max="300">
   <label>Місто є, а генератор ще працює: нагадувати «вимкніть генератор» кожні … хв (0 — лише раз), до 6 разів</label><input id="f_genRemMin" type="number" min="0" max="240">
@@ -303,7 +301,7 @@ function ago(s){if(s==null)return '—';s=Math.max(0,s|0);if(s<60)return s+' с'
 function note(id,text,bad){const e=$(id);e.className='msg'+(bad?' err':'');e.textContent=text}
 function relogin(){let t=0;try{t=+sessionStorage.getItem('rl')||0}catch(e){}if(Date.now()-t<10000)return;try{sessionStorage.setItem('rl',String(Date.now()))}catch(e){}location.reload()}
 async function j(u,o){const r=await fetch(u,Object.assign({credentials:'same-origin'},o));if(r.status===401){relogin();throw new Error('Потрібен вхід: оновіть сторінку')}const t=await r.text();let d;try{d=JSON.parse(t)}catch(e){d={err:t}}if(!r.ok)throw new Error(d.err||('HTTP '+r.status));return d}
-async function refresh(){try{render(await j('/api/state'))}catch(e){$('status').textContent=e.message.startsWith('Потрібен вхід')?e.message:'Немає зв\'язку зі Сторожем';$('dot').className='dot'}}
+async function refresh(){try{render(await j('/api/state'+(tab==='log'?'?log=1':'')))}catch(e){$('status').textContent=e.message.startsWith('Потрібен вхід')?e.message:'Немає зв\'язку зі Сторожем';$('dot').className='dot'}}
 function render(d){
  const w=d.watch,g=w.grid.st,l=w.line.st,le=w.line.enabled;
  $('obj').textContent='· '+w.obj;
@@ -348,7 +346,7 @@ function render(d){
  $('clhint').textContent=aY?'АВР-ом зараз призначено пристрій, з якого відкрито цю сторінку. Справжній АВР з\'явиться окремим рядком, коли його підключать у застосунку eWeLink до точки «'+d.net.ap.ssid+'».':
   !w.avr.assigned&&unk===1?'У мережі для АВР один невідомий пристрій. Якщо АВР щойно підключали в eWeLink, це він: натисніть «Це АВР».':
   (!w.avr.assigned&&!unk?'Підключіть АВР у застосунку eWeLink до точки «'+d.net.ap.ssid+'».':'');
- $('lg').innerHTML=d.log.map(e=>'<tr><td class="mut" style="white-space:nowrap">'+esc(e.t)+'</td><td>'+esc(e.x)+'</td></tr>').join('');
+ if(d.log)$('lg').innerHTML=d.log.map(e=>'<tr><td class="mut" style="white-space:nowrap">'+esc(e.t)+'</td><td>'+esc(e.x)+'</td></tr>').join('');
  $('ver').textContent='Зараз: '+d.ver+', збірка '+d.build;
  let s='';
  lastTg=t;
@@ -409,7 +407,7 @@ let curSet=null,annAll=0;
 $('a_to').addEventListener('change',()=>$('a_who').classList.toggle('hide',$('a_to').value!=='sel'));
 async function loadSet(){
  try{const s=await j('/api/settings');curSet=s;
-  for(const k of ['obj','staSsid','staBssid','apSsid','avrMac','offSec','onSec','glitchSec','lineOffSec','lineOnSec','genRemMin'])$('f_'+k).value=s[k];
+  for(const k of ['obj','staSsid','staBssid','apSsid','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin'])$('f_'+k).value=s[k];
   $('f_notifyStart').checked=s.notifyStart;bcnReload();
   $('f_schOn').checked=!!s.schOn;$('f_schTom').checked=!!s.schTom;$('f_schDso').value=s.schDso||'3/301';$('f_schQueue').value=s.schQueue||'';$('f_schWarn').value=s.schWarn;
   $('h_staPass').textContent=s.staPassSet?'(задано)':'(не задано)';
@@ -441,7 +439,7 @@ async function loadTg(){
 }
 async function save(){
  const p=new URLSearchParams();
- for(const k of ['obj','staSsid','staBssid','staPass','apSsid','apPass','avrMac','offSec','onSec','glitchSec','lineOffSec','lineOnSec','genRemMin','adminPass'])p.append(k,$('f_'+k).value);
+ for(const k of ['obj','staSsid','staBssid','staPass','apSsid','apPass','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin','adminPass'])p.append(k,$('f_'+k).value);
  p.append('notifyStart',$('f_notifyStart').checked?'1':'0');p.append('pwBtn',$('f_pwBtn').value);
  p.append('schOn',$('f_schOn').checked?'1':'0');p.append('schTom',$('f_schTom').checked?'1':'0');p.append('schDso',$('f_schDso').value);p.append('schQueue',$('f_schQueue').value);p.append('schWarn',$('f_schWarn').value);
  try{const r=await j('/api/settings',{method:'POST',body:p});

@@ -17,9 +17,8 @@ when to start and stop the generator.
 The TOMZN TOQ7E ATS (eWeLink app) powers its Wi-Fi from the **mains** input only. Storozh — an ESP32 WROOM board —
 joins the building's router and provides **its own** network just for the ATS, with NAT, so eWeLink keeps working.
 ATS present on Storozh's network — mains is on; silent — mains is off. Storozh pings the ATS every second: "mains off"
-after 12 s of silence ("on" after 10 s online), and messages carry the real moment of the event. A link drop is not an
-outage: a live ATS that lost the link leaves the network on its own or searches for it, while a powered-off one just goes
-silent; as long as there is such a sign of life, mains is considered on.
+after 12 s of silence ("on" after 10 s online), and messages carry the real moment of the event. Like a beacon: the ATS on the
+network and answering means mains is on; off the network or silent means mains is off, no guessing.
 
 A **beacon** is an optional ESP32-C3 plugged into the generator's outlet: online means the generator is running.
 Beacons on individual lines or phases report where voltage is present.

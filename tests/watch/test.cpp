@@ -40,6 +40,7 @@ static int64_t glitchAt = 0;
 static bool avrProbing = false, avrLeftAlive = true;
 static int64_t probeDelay = 4000000;
 static int64_t glitchLastPing = -1;             // ≥ 0 — коли АВР востаннє відповідав (до вимкнення), а не glitchAt
+static bool probeOnce = false;                  // 1.0.34: лише один запит пошуку (через probeDelay), далі тиша
 bool staUp() { return true; }
 int staRssi() { return -50; }
 int64_t apChannelChangedUs() { return 0; }
@@ -51,7 +52,7 @@ bool findClient(const uint8_t mac[6], ApDev& out) {
     out.used = true; memcpy(out.mac, mac, 6); out.assoc = false; out.pingWorks = true;
     out.leftAlive = avrLeftAlive; out.leaveReason = avrLeftAlive ? 3 : 0; out.leaveUs = glitchAt; out.lastPingOkUs = glitchLastPing >= 0 ? glitchLastPing : glitchAt;
     if (avrProbing && T - glitchAt >= probeDelay) {
-      int64_t k = (T - glitchAt - probeDelay) / 5000000;
+      int64_t k = probeOnce ? 0 : (T - glitchAt - probeDelay) / 5000000;
       out.lastProbeUs = glitchAt + probeDelay + k * 5000000; out.probeRssi = -80;
     }
     return true;
@@ -304,45 +305,26 @@ int main() {
   check(start15, "і «перезапустився» адміністраторам");
   for (auto& x : v) { std::string one = x.text; for (auto& ch : one) if (ch == '\n') ch = '|'; printf("    %s\n", one.c_str()); }
 
-  //  ---------- 1.0.29: обрив зв'язку з АВР — не «міста немає» ----------
-  S.glitchSec = 90;
-  puts("16) АВР сам вийшов із точки (код 3, живий) і повернувся за 60 с");
-  avrUp = true; avrUpAt = T; avrGlitch = false;
+  //  ---------- 1.0.35: АВР — як маячок (власник: «есть связь — работает, отключился от сети — нет») ----------
+  puts("16) АВР сам вийшов із точки (код 3) і повернувся за 60 с — як маячок: «Зникло» за ~12 с і «Повернулось»");
+  avrUp = true; avrUpAt = T; avrGlitch = false; avrProbing = false; probeOnce = false; glitchLastPing = -1;
   run(T / 1000000 + 120);
   since();
-  check(grid.st == T_ON, "до обриву: місто є");
-  size_t lg16 = g_log.size();
-  avrGlitch = true; glitchAt = T;
-  bool off16 = false;
-  for (int k = 0; k < 60; k++) { run(T / 1000000 + 1); if (grid.st != T_ON) off16 = true; }
+  check(grid.st == T_ON, "до виходу: місто є");
+  avrGlitch = true; avrLeftAlive = true; glitchAt = T;
+  int64_t t16 = T, off16 = 0;
+  for (int k = 0; k < 60; k++) { run(T / 1000000 + 1); if (!off16 && grid.st == T_OFF) off16 = T; }
   avrGlitch = false; avrUpAt = T;
-  run(T / 1000000 + 60);
+  run(T / 1000000 + 30);
   v = since();
-  bool said16 = false, back16 = false;
-  for (size_t k = lg16; k < g_log.size(); k++) { if (has(g_log[k], "вийшов із мережі сам")) said16 = true; if (has(g_log[k], "обрив зв'язку")) back16 = true; }
-  check(!off16 && grid.st == T_ON, "увесь час — «є»: 60 с без АВР після живого виходу — не відключення");
-  check(v.empty(), "жодного повідомлення в Telegram");
-  check(said16 && back16, "у журналі — «вийшов із мережі сам … обрив зв'язку» і «повернувся»");
-  puts("17) АВР сам вийшов живим — і не повернувся (світло зникло відразу після)");
-  avrGlitch = true; glitchAt = T;
-  int64_t t17 = T;
-  int64_t offAt17 = 0;
-  for (int k = 0; k < 150 && !offAt17; k++) { run(T / 1000000 + 1); if (grid.st == T_OFF) offAt17 = T; }
-  v = since();
-  long long after17 = offAt17 ? (long long)((offAt17 - t17) / 1000000) : -1;
-  printf("    «міста немає» через %lld с після виходу\n", after17);
-  check(offAt17 && after17 >= 95 && after17 <= 105, "«міста немає» — лише через ~90 с (S.glitchSec) + 10 с, а не за 12 с");
-  bool lost17 = false; for (auto& x : v) if (has(x.text, "Зникло міське світло")) lost17 = true;
-  check(lost17, "і тоді «Зникло міське світло»");
-  bool ex17; int64_t s17 = watchGridSince(ex17);
-  check(s17 <= t17 + 1000000 && s17 >= t17 - 3000000, "час зникнення — коли АВР вийшов, а не коли минули 3 хв");
-  avrGlitch = false;
+  bool lost16 = false, back16 = false;
+  for (auto& x : v) { if (has(x.text, "Зникло міське світло")) lost16 = true; if (has(x.text, "Міське світло повернулось")) back16 = true; }
+  check(off16 && (off16 - t16) / 1000000 <= 15, "вийшов із мережі — «міста немає» за ≤ 15 с, без «чекаю 3 хв»");
+  check(lost16 && back16 && grid.st == T_ON, "«Зникло» і «Повернулось» — як у маячка");
+
   puts("18) Справжнє зникнення живлення: АВР замовк, із точки не виходив — «міста немає» за ~12 с");
   avrUp = true; avrUpAt = T;
-  size_t lg18 = g_log.size();
   run(T / 1000000 + 120);
-  bool wrong18 = false; for (size_t k = lg18; k < g_log.size(); k++) if (has(g_log[k], "не зникало")) wrong18 = true;
-  check(!wrong18, "після справжнього відключення (17) — без «світло не зникало»");
   since();
   avrUp = false; avrDownAt = T;
   int64_t t18 = T, offAt18 = 0;
@@ -355,39 +337,66 @@ int main() {
   printf("    час зникнення в повідомленні: %lld с від справжнього\n", d18);
   check(ex18 && d18 >= -2 && d18 <= 1, "час зникнення — остання відповідь АВР (±2 с)");
 
-  //  ---------- 1.0.31: АВР шукає мережу — живий ----------
-  puts("19) АВР замовк і випав із точки мовчки (не «вийшов сам»), але 5 хв шукає мережу; потім повернувся");
-  avrUp = true; avrUpAt = T; avrGlitch = false;
+  puts("19) АВР замовк і 5 хв шукає мережу — «міста немає»; запити пошуку на стан не впливають; під'єднався — «є»");
+  avrUp = true; avrUpAt = T;
   run(T / 1000000 + 120);
   since();
   size_t lg19 = g_log.size();
-  avrGlitch = true; avrLeftAlive = false; avrProbing = true; probeDelay = 4000000; glitchAt = T;
-  bool off19 = false;
-  for (int k = 0; k < 300; k++) { run(T / 1000000 + 1); if (grid.st != T_ON) off19 = true; }
-  avrGlitch = false; avrProbing = false; avrLeftAlive = true; avrUpAt = T;
+  avrGlitch = true; avrLeftAlive = false; avrProbing = true; probeDelay = 4000000; glitchAt = T; glitchLastPing = T;
+  std::vector<int> seen19;
+  for (int k = 0; k < 300; k++) { run(T / 1000000 + 1); if (seen19.empty() || seen19.back() != grid.st) seen19.push_back(grid.st); }
+  avrGlitch = false; avrProbing = false; avrLeftAlive = true; glitchLastPing = -1; avrUp = true; avrUpAt = T;
   run(T / 1000000 + 30);
   v = since();
-  bool said19 = false; for (size_t k = lg19; k < g_log.size(); k++) if (has(g_log[k], "шукає мережу Сторожа")) said19 = true;
-  check(!off19 && grid.st == T_ON, "5 хв без зв'язку, але шукає мережу — увесь час «є»");
-  check(v.empty(), "жодного повідомлення");
-  check(said19, "у журналі — «шукає мережу Сторожа … живий»");
-  puts("20) Світла не було; повернулось — АВР спершу шукає мережу, під'єднується за 8 с");
+  bool said19 = false; for (size_t k = lg19; k < g_log.size(); k++) if (has(g_log[k], "шукає її")) said19 = true;
+  check(seen19.size() == 2 && seen19[1] == T_OFF, "без зв'язку — «немає» й без миготіння, хоч АВР шукає мережу");
+  int lost19 = 0, back19 = 0; for (auto& x : v) { if (has(x.text, "Зникло")) lost19++; if (has(x.text, "повернулось")) back19++; }
+  check(lost19 == 1 && back19 == 1 && grid.st == T_ON, "рівно одне «Зникло» й одне «Повернулось»");
+  check(said19, "запити пошуку — лише рядок у журналі");
+
+  puts("20) Світла не було; повернулось — АВР спершу шукає мережу, під'єднується за 8 с — «є» після під'єднання");
   avrUp = false; avrDownAt = T;
   run(T / 1000000 + 60);
   check(grid.st == T_OFF, "спершу — «немає»");
   since();
-  avrGlitch = true; avrLeftAlive = false; avrProbing = true; probeDelay = 0; glitchAt = T;   // увімкнувся: одразу шукає
-  glitchLastPing = avrDownAt;                    // востаннє відповідав перед відключенням
+  avrGlitch = true; avrLeftAlive = false; avrProbing = true; probeDelay = 0; glitchAt = T; glitchLastPing = avrDownAt;
   int64_t t20 = T, on20 = 0;
-  for (int k = 0; k < 8 && !on20; k++) { run(T / 1000000 + 1); if (grid.st == T_ON) on20 = T; }
+  for (int k = 0; k < 8; k++) { run(T / 1000000 + 1); if (!on20 && grid.st == T_ON) on20 = T; }
+  check(!on20, "поки лише шукає мережу — ще «немає»");
   avrGlitch = false; avrProbing = false; avrLeftAlive = true; avrUp = true; avrUpAt = T; glitchLastPing = -1;
+  int64_t tj20 = T;
   for (int k = 0; k < 30 && !on20; k++) { run(T / 1000000 + 1); if (grid.st == T_ON) on20 = T; }
   v = since();
-  long long a20 = on20 ? (long long)((on20 - t20) / 1000000) : -1;
-  printf("    «місто є» через %lld с після першого запиту АВР\n", a20);
-  check(on20 && a20 <= 12, "«місто є» за ~10 с від першого запиту, ще до під'єднання");
+  long long a20 = on20 ? (long long)((on20 - tj20) / 1000000) : -1;
+  printf("    «місто є» через %lld с після під'єднання (%lld с від першого запиту)\n", a20, on20 ? (long long)((on20 - t20) / 1000000) : -1);
+  check(on20 && a20 <= 12, "«місто є» за ~10 с від під'єднання (S.onSec)");
   bool back20 = false; for (auto& x : v) if (has(x.text, "Міське світло повернулось")) back20 = true;
   check(back20, "«Міське світло повернулось»");
+
+  puts("21) Як 21–22.11: АВР замовк — «Зникло»; за 10 хв один запит пошуку; 2 год тиші; потім під'єднався — «Повернулось»");
+  avrUp = true; avrUpAt = T; avrGlitch = false; avrProbing = false; probeOnce = false; glitchLastPing = -1;
+  run(T / 1000000 + 120);
+  since();
+  int outs21 = g_outStarts;
+  avrGlitch = true; avrLeftAlive = false; glitchAt = T; glitchLastPing = T;
+  avrProbing = true; probeOnce = true; probeDelay = 10LL * 60 * 1000000;
+  std::vector<int> seen21;
+  for (int k = 0; k < 130; k++) { run(T / 1000000 + 60); if (seen21.empty() || seen21.back() != grid.st) seen21.push_back(grid.st); }
+  v = since();
+  int lost21 = 0, back21 = 0; for (auto& x : v) { if (has(x.text, "Зникло")) lost21++; if (has(x.text, "повернулось")) back21++; }
+  check(seen21.size() == 1 && seen21[0] == T_OFF && lost21 == 1 && back21 == 0, "«Зникло» один раз і далі «немає» — запит пошуку стану не змінює");
+  avrGlitch = false; avrProbing = false; probeOnce = false; glitchLastPing = -1; avrUp = true; avrUpAt = T;
+  run(T / 1000000 + 30);
+  v = since();
+  bool b21 = false; for (auto& x : v) if (has(x.text, "Міське світло повернулось")) b21 = true;
+  check(grid.st == T_ON && b21, "під'єднався — «Повернулось»");
+  check(g_outStarts == outs21 + 1, "облік: одне відключення");
+
+  puts("22) Після цього — справжнє зникнення живлення знову за ~12 с");
+  avrUp = false; avrDownAt = T;
+  int64_t t22 = T, off22 = 0;
+  for (int k = 0; k < 60 && !off22; k++) { run(T / 1000000 + 1); if (grid.st == T_OFF) off22 = T; }
+  check(off22 && (off22 - t22) / 1000000 <= 15, "«міста немає» за ≤ 15 с");
 
   printf("\n%s: %d помилок\n", fails ? "НЕ ПРОЙДЕНО" : "УСЕ ПРОЙДЕНО", fails);
   return fails ? 1 : 0;

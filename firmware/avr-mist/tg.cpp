@@ -281,6 +281,19 @@ static int call(const String& token, const char* method, const String& body, Str
   hc->setConnectTimeout(8000);
   hc->setTimeout(readMs);
   if (hc->begin(*cli, String("https://api.telegram.org/bot") + token + "/" + method)) {
+    //  1.0.33: нове з'єднання — лише коли пам'яті досить. 22.11.2026 о 10:44: «X509 — Certificate verification failed»,
+    //  хоча сертифікат Telegram правильний: перевірці підпису забракло пам'яті, поки сторінка й Wi-Fi тимчасово її забрали.
+    //  Чекаємо до 8 с, поки вільно ≥ 36 КБ і найбільший шматок ≥ 12 КБ.
+    if (!hc->connected()) {
+      int64_t t0 = nowUs();
+      while ((ESP.getFreeHeap() < 36000 || ESP.getMaxAllocHeap() < 12000) && nowUs() - t0 < 8000000LL) {
+        hbUs = nowUs();
+        vTaskDelay(pdMS_TO_TICKS(250));
+      }
+      int64_t w = (nowUs() - t0) / 1000000;
+      if (w >= 2) logEvent("Telegram: чекав пам'ять для з'єднання " + String((long)w) + " с (вільно " + String(ESP.getFreeHeap() / 1024) +
+                           " КБ, найбільший шматок " + String(ESP.getMaxAllocHeap() / 1024) + " КБ)");
+    }
     hc->addHeader("Content-Type", "application/json");
     code = hc->POST(body);
     resp = code > 0 ? hc->getString() : String();

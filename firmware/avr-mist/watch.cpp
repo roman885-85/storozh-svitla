@@ -403,50 +403,50 @@ void watchLoop() {
       bool joining = now - cl.assocUs < JOIN_WINDOW;
       present = cl.pingWorks ? (fresh || joining) : true;   // не відповідає на ping — віримо самому під'єднанню
     }
-    //  1.0.30–1.0.31 (власник: «ложные срабатывания … при недоступности облака или кратковременных обрывов связи с АВР не
-    //  должны приводить к ложным сработкам»; 20.11 о 15:20 — хибне «зникло» на ~3 хв). Ознаки життя АВР, коли він не на
-    //  зв'язку: (1) сам вийшов із точки, відповідаючи на ping за мить до того; (2) шле запити пошуку мережі вже після того,
-    //  як перестав відповідати. Без живлення немає ні того, ні того. Поки ознака свіжа (S.glitchSec від останньої) — АВР
-    //  живий, отже місто є. Справжнє зникнення — тиша: «міста немає» за S.offSec, як і було.
-    int64_t sign = 0;
-    bool byProbe = false;
-    if (found && !present) {
-      if (!cl.assoc && cl.leftAlive) sign = cl.leaveUs;
-      if (cl.lastProbeUs && cl.lastProbeUs > cl.lastPingOkUs + 1500000 && cl.lastProbeUs > sign) { sign = cl.lastProbeUs; byProbe = true; }
-    }
-    bool alive = sign && now - sign < (int64_t)S.glitchSec * 1000000;
-    raw = present || alive;
+    //  1.0.35 (власник 22.11.2026: «сделай подключение АВР как функцию маячка — есть связь — работает, отключился от сети —
+    //  нет»). Здогадки 1.0.30–1.0.34 («вийшов сам — живий, чекаю 3 хв», «шукає мережу — живий», «живий, але не під'єднаний —
+    //  світло є») прибрано: вони робили поведінку непередбачуваною. Тепер як у маячка: АВР у мережі Сторожа й відповідає —
+    //  місто є; випав із мережі чи замовк — «міста немає» за S.offSec від останньої відповіді; знову в мережі S.onSec — «є».
+    //  Запити пошуку мережі від АВР — лише рядок у журналі, на стан не впливають.
+    raw = present;
+    static bool probeSaid = false;
+    if (!present && found && cl.lastProbeUs && cl.lastProbeUs > cl.lastPingOkUs + 1500000) {
+      if (!probeSaid) {
+        probeSaid = true;
+        logEvent("АВР не в мережі Сторожа, але шукає її (сигнал " + String(cl.probeRssi) + " дБм) — для журналу, на стан не впливає");
+      }
+    } else if (present) probeSaid = false;
     //  1.0.29 (власник: «скорость сработки отсутствия света … не больше 15»): «АВР мовчить N с» — від останньої відповіді,
     //  а не від миті, коли мовчання помітили (раніше до S.offSec додавалось ще 8 с: 30 с → 38 с).
     int64_t offUs = (int64_t)S.offSec * 1000000 - PING_FRESH;
     if (offUs < 1000000) offUs = 1000000;
+    //  Точка Сторожа сама змінила канал (за роутером) — АВР шукає її на новому: 2 хв на це (дія Сторожа, не здогадка про АВР)
     int64_t chg = apChannelChangedUs();
-    if (chg && now - chg < 180LL * 1000000 && offUs < 120LL * 1000000) offUs = 120LL * 1000000;   // точка змінила канал — АВР шукає її
-    //  1.0.29 (власник 20.11.2026: «ложные срабатывания отсутствия света при недоступности облака или кратковременных
-    //  обрывов связи с АВР не должны приводить к ложным сработкам»). Без живлення АВР замовкає: ping не відповідає, а з
-    //  точки він випадає лише за 2 хв неактивності (код 4). Коли ж АВР сам виходить із точки, відповідаючи на ping за мить
-    //  до того (18.11 так двічі, код 3, світло було), — він живий і перепідключає Wi-Fi: слабкий сигнал, недоступна хмара
-    //  eWeLink. Це обрив зв'язку, не світло: «міста немає» — лише якщо не повернувся за S.glitchSec (типово 3 хв).
-    static bool glitchSaid = false, probeSaid = false;
-    if (alive && !present) {
-      if (!glitchSaid && grid.st == T_ON && !byProbe) {
-        glitchSaid = true;
-        logEvent("АВР вийшов із мережі сам (код " + String(cl.leaveReason) + "), живий — це обрив зв'язку, не світло: чекаю, поки повернеться");
-      }
-      if (!probeSaid && byProbe) {
-        probeSaid = true;
-        logEvent("АВР не на зв'язку, але шукає мережу Сторожа (сигнал " + String(cl.probeRssi) + " дБм) — живий, отже місто є");
-      }
-    } else if (present && (glitchSaid || probeSaid)) {
-      if (grid.st == T_ON) logEvent("АВР повернувся — світло не зникало, це був обрив зв'язку");
-      glitchSaid = probeSaid = false;
-    } else if (!alive) glitchSaid = probeSaid = false;
+    if (chg && now - chg < 180LL * 1000000 && offUs < 120LL * 1000000) offUs = 120LL * 1000000;
     if (step(grid, raw, now, (int64_t)S.onSec * 1000000, offUs, afterGrace, c)) {
-      //  Момент зникнення — остання відповідь АВР (точність ~1 с), а не мить, коли помітили мовчання
-      if (grid.st == T_OFF && grid.exact && found) {
-        int64_t life = cl.lastPingOkUs > sign ? cl.lastPingOkUs : sign;   // остання ознака життя АВР
-        if (life && life < grid.since) grid.since = life;
+      //  1.0.33 (власник 22.11.2026: «ложное срабатывание отсутствия света» — а журнал до того стерся з відключенням
+      //  живлення). Тепер кожне «міста немає» пише в журнал, як саме зник АВР, а коротке відключення — як він повернувся:
+      //  так хибне спрацьовування видно й без моєї присутності.
+      if (grid.st == T_OFF && c.from == T_ON) {
+        String w;
+        if (!found) w = "АВР у точці не значиться";
+        else if (cl.assoc) w = "АВР у точці, але не відповідає на ping" + (cl.lastPingOkUs ? " " + String((long)((now - cl.lastPingOkUs) / 1000000)) + " с" : String());
+        else w = "АВР вийшов із точки " + String((long)((now - cl.leaveUs) / 1000000)) + " с тому (код " + String(cl.leaveReason) +
+                 (cl.leftAlive ? ", за мить до того відповідав" : "") + ")";
+        if (found && cl.lastProbeUs) w += "; останній запит пошуку мережі від нього — " + String((long)((now - cl.lastProbeUs) / 1000000)) + " с тому";
+        logEvent("Чому «міста немає»: " + w + "; затримка " + String(S.offSec) + " с, сигнал АВР був " + String(found ? cl.rssi : 0) + " дБм");
       }
+      if (grid.st == T_ON && c.from == T_OFF && grid.exact && c.fromExact) {
+        long dur = (long)((grid.since - c.fromSince) / 1000000);
+        if (dur >= 0 && dur < 180)
+          logEvent("Коротке відключення — " + String(dur) + " с: АВР " +
+                   (found && cl.assocUs && now - cl.assocUs < 120000000LL ? String("знову під'єднався до точки — виходив із мережі")
+                                                                          : String("із точки не виходив — лише мовчав")) +
+                   ". Якщо світло насправді не зникало, це обрив зв'язку з АВР.");
+      }
+      //  Момент зникнення — остання відповідь АВР (точність ~1 с), а не мить, коли помітили мовчання
+      if (grid.st == T_OFF && grid.exact && found && cl.lastPingOkUs && cl.lastPingOkUs < grid.since)
+        grid.since = cl.lastPingOkUs;                // момент — остання відповідь АВР
       bool rs = rwRestore(grid, c, RW.d.gst, RW.d.gex, RW.d.gsince, rwGridTried);
       if (rs) rwGridSame = true;
       if (!gridChecked) rwGridSame = false;      // відновлене не підтвердилось — за час перезапуску світло змінилось

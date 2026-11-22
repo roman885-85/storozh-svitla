@@ -534,13 +534,18 @@ static void hState() {
   srv.sendContent(",\"sig\":" + sigJson());
   srv.sendContent(",\"sch\":" + schJson());
   srv.sendContent(",\"tls\":" + tlsPoolJson());          // 1.0.32: запас пам'яті для TLS
-  srv.sendContent(",\"log\":[");                         // 1.0.32: по одному запису — без рядка на 10–20 КБ
-  for (int i = 0; i < 60; i++) {
-    String e = logEntryJson(i);
-    if (!e.length()) break;
-    srv.sendContent(i ? "," + e : e);
+  //  1.0.33: журнал — лише коли сторінка на вкладці «Журнал» (?log=1). Сторінка питає стан кожні 3 с; журнал робив
+  //  відповідь у 3–4 рази більшою — це пам'ять Wi-Fi і TCP саме тоді, коли з'єднанню з Telegram її бракувало.
+  if (srv.hasArg("log")) {
+    srv.sendContent(",\"log\":[");                       // 1.0.32: по одному запису — без рядка на 10–20 КБ
+    for (int i = 0; i < 60; i++) {
+      String e = logEntryJson(i);
+      if (!e.length()) break;
+      srv.sendContent(i ? "," + e : e);
+    }
+    srv.sendContent("]");
   }
-  srv.sendContent("]}");
+  srv.sendContent("}");
   srv.sendContent("");
 }
 
@@ -550,7 +555,7 @@ static void hSettingsGet() {
   String o = "{\"obj\":\"" + jsonEsc(S.objName) + "\",\"staSsid\":\"" + jsonEsc(S.staSsid) + "\",\"staPassSet\":" + b(S.staPass.length()) + ",\"staBssid\":\"" + jsonEsc(S.staBssid) + "\"" +
              ",\"apSsid\":\"" + jsonEsc(S.apSsid) + "\",\"tgTokenSet\":" + b(S.tgToken.length()) + ",\"tgTokenHint\":\"" + jsonEsc(hint) +
              "\",\"tgChats\":\"" + jsonEsc(S.tgChats) + "\",\"avrMac\":\"" + jsonEsc(S.avrMac) + "\",\"mayakOn\":" + b(S.mayakOn) +
-             ",\"notifyStart\":" + b(S.notifyStart) + ",\"offSec\":" + String(S.offSec) + ",\"onSec\":" + String(S.onSec) + ",\"glitchSec\":" + String(S.glitchSec) +
+             ",\"notifyStart\":" + b(S.notifyStart) + ",\"offSec\":" + String(S.offSec) + ",\"onSec\":" + String(S.onSec) +
              ",\"lineOffSec\":" + String(S.lineOffSec) + ",\"lineOnSec\":" + String(S.lineOnSec) + ",\"lineWarnSec\":" + String(S.lineWarnSec) + ",\"genRemMin\":" + String(S.genRemMin) +
              ",\"sumOn\":" + b(S.sumOn) + ",\"sumHour\":" + String(S.sumHour) +
              ",\"adminDefault\":" + b(S.adminPass == defaultPass()) + ",\"pwBtn\":" + String(S.pwBtn) +
@@ -609,7 +614,6 @@ static void hSettingsPost() {
   if (srv.hasArg("sumHour")) { long h = srv.arg("sumHour").toInt(); if (h < 0 || h > 23) return fail("Година підсумку — від 0 до 23"); n.sumHour = (uint8_t)h; }
   if (!num("offSec", n.offSec, 5, 600, "Затримка «міста немає»")) return;
   if (!num("onSec", n.onSec, 3, 300, "Затримка «місто є»")) return;
-  if (!num("glitchSec", n.glitchSec, 20, 900, "Обрив зв'язку з АВР")) return;
   if (!num("lineOffSec", n.lineOffSec, 5, 600, "Затримка «лінія без напруги»")) return;
   if (!num("lineOnSec", n.lineOnSec, 3, 300, "Затримка «лінія під напругою»")) return;
   if (!num("lineWarnSec", n.lineWarnSec, 0, 3600, "Попередження про лінію")) return;

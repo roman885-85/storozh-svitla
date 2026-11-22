@@ -8,6 +8,7 @@
 #include "ping/ping_sock.h"
 #include "esp_netif_net_stack.h"   // esp_netif_get_netif_impl: прапорець NAT у самому інтерфейсі lwIP
 #include "lwip/netif.h"
+#include "tg.h"
 
 static const IPAddress AP_IP(10, 77, 0, 1), AP_MASK(255, 255, 255, 0), AP_LEASE(10, 77, 0, 10), DNS_FALLBACK(8, 8, 8, 8);
 
@@ -336,6 +337,27 @@ void bridgeLoop() {
   }
   natCheck(now);
   prefCheck(now);
+  //  1.0.33 (22.11.2026: бажаною стала далека точка-ретранслятор — Сторож слухняно перейшов на неї, а з нею й увесь зв'язок).
+  //  Не на бажаній точці понад 10 хв — у журнал і адміністраторам (без звуку); повернувся — у журнал.
+  {
+    static int64_t notPrefSince = 0;
+    static bool told = false;
+    if (gStaUp && S.staBssid.length()) {
+      if (onPreferred()) {
+        if (told) logEvent("Сторож знову на бажаній точці роутера " + S.staBssid);
+        notPrefSince = 0;
+        told = false;
+      } else if (!notPrefSince) notPrefSince = now;
+      else if (!told && now - notPrefSince > 10LL * 60 * 1000000) {
+        told = true;
+        String m = "Сторож 10 хв не на бажаній точці роутера: зараз " + WiFi.BSSIDstr() + " (" + String(WiFi.RSSI()) + " дБм), бажана — " + S.staBssid;
+        logEvent(m);
+        tgBroadcast(now, "⚠️ <b>Сторож не на бажаній точці роутера</b>\n⛪ " + htmlEsc(S.objName) + " · %T\nЗараз — " + WiFi.BSSIDstr() + " (" +
+                         String(WiFi.RSSI()) + " дБм), бажана — " + htmlEsc(S.staBssid) + ".\nБажаної немає в ефірі або її змінили в налаштуваннях: " +
+                         "сторінка Сторожа → «Налаштування» → Wi-Fi роутера.", true, C_ADMIN);
+      }
+    }
+  }
 
   // канал точки (іде за каналом роутера): з роутером — канал роутера, без нього — канал радіо
   int ch = 0;
