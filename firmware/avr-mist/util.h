@@ -26,4 +26,5 @@ void   logEvent(const String& text);  // журнал подій — у RAM; 1.0
 void   logEventLocal(const String& text);   // лише в RAM — для рядків, що вже прийшли зі «скриньки»
 String logJson(int maxN);
 String logEntryJson(int i);         // 1.0.32: i-й запис від найновішого, «» — немає
+String logMemJson();                // 1.0.38: де журнал (IRAM чи ні), місткість, зайнято, рядків
 String logText(int maxN, size_t maxLen);   // «📋 Журнал» у боті (1.0.21): нові згори, HTML-безпечно

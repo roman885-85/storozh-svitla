@@ -346,7 +346,8 @@ static void playMelody(const String& mel) {
 //  м'який сигнал — синус із легкою другою гармонікою. Плавний наступ (без клацання), дизеринг ±1 молодший розряд —
 //  щоб тихі хвости не рипіли на 8 бітах. На початку й наприкінці вихід плавно йде від 0 до середини й назад.
 static const int FS = 16000;
-static float sinT[1024];
+//  1.0.38: таблиця синуса (4 КБ) — у купі лише на час вбудованого звуку динаміка; з бузером її немає зовсім
+static float* sinT = nullptr;
 static dac_continuous_handle_t dh = nullptr;
 static bool dacOpen() {
   dac_continuous_config_t c = {};
@@ -421,6 +422,9 @@ static void synth(int ev, bool bell) {
     total = (int)((bell ? 1.75f : 1.5f) * FS);
   }
   const float g = 0.30f * volGain();             // три удари дзвону разом не впираються в стелю й на 100 %
+  sinT = (float*)malloc(1024 * sizeof(float));
+  if (!sinT) { logEvent("Звук: бракує пам'яті для вбудованого звуку"); return; }
+  for (int i = 0; i < 1024; i++) sinT[i] = sinf(i * 6.2831853f / 1024.0f);
   uint8_t buf[512];
   for (int s = 0; s < total && !sndAbort; s += 512) {
     int m = total - s < 512 ? total - s : 512;
@@ -443,13 +447,40 @@ static void synth(int ev, bool bell) {
     }
     dacPut(buf, m);
   }
+  free(sinT);
+  sinT = nullptr;
 }
-static bool fsOk = false;
+//  1.0.38: розділ для своїх звуків під'єднуємо лише на час дії (відтворення, запис, видалення) — під'єднаний він
+//  тримає кілька КБ пам'яті, а в більшості своїх звуків немає. Розміри файлів пам'ятаємо, щоб сторінка, яка питає стан
+//  кожні 4 с, не відкривала файли щоразу (так було до 1.0.37). Лічильник — бо відтворення й запис ідуть із різних задач.
+static bool fsOk = false;                        // розділ розмічено (файлова система є)
+static size_t szSnd[2] = {0, 0};                 // розміри /lost.u8 і /back.u8
+static int fsUsers = 0;
+static SemaphoreHandle_t fsMtx = nullptr;
 static const char* sndFile(int w) { return w ? "/back.u8" : "/lost.u8"; }
+static bool fsUse(bool format) {
+  xSemaphoreTake(fsMtx, portMAX_DELAY);
+  bool ok = fsUsers > 0 || LittleFS.begin(format, "/littlefs", 4, "spiffs");
+  if (ok) { fsUsers++; fsOk = true; }
+  xSemaphoreGive(fsMtx);
+  return ok;
+}
+static void fsDone() {
+  xSemaphoreTake(fsMtx, portMAX_DELAY);
+  if (fsUsers > 0 && --fsUsers == 0) LittleFS.end();
+  xSemaphoreGive(fsMtx);
+}
+static void fsSizes() {                          // лише під fsUse()
+  for (int w = 0; w < 2; w++) {
+    File f = LittleFS.open(sndFile(w), "r");
+    szSnd[w] = f ? f.size() : 0;
+    if (f) f.close();
+  }
+}
 static bool playFile(int ev) {
-  if (!fsOk) return false;
+  if (!szSnd[ev ? 1 : 0] || !fsUse(false)) return false;
   File f = LittleFS.open(sndFile(ev), "r");
-  if (!f) return false;
+  if (!f) { fsDone(); return false; }
   const float g = volGain();
   uint8_t buf[512];
   for (;;) {
@@ -462,6 +493,7 @@ static bool playFile(int ev) {
     dacPut(buf, m);
   }
   f.close();
+  fsDone();
   return true;
 }
 static void playDac(int ev) {
@@ -484,10 +516,15 @@ static void play(int ev) {
   }
 }
 
+static TaskHandle_t sndH;
+static void sndEnsure();
 static void sndTask(void*) {
   SndReq r;
   for (;;) {
-    if (xQueueReceive(sq, &r, portMAX_DELAY) != pdTRUE) continue;
+    if (xQueueReceive(sq, &r, pdMS_TO_TICKS(5000)) != pdTRUE) {
+      if (!S.sndType) { sndH = nullptr; vTaskDelete(nullptr); }   // 1.0.38: звук вимкнули — задача більше не потрібна
+      continue;
+    }
     sndAbort = false;
     sndBusy = true;
     playVol = r.vol;
@@ -512,6 +549,7 @@ void sigEvent(int from, int to) {
   if (!S.sndType || (to == 0 && !S.sndLost) || (to == 1 && !S.sndBack)) return;
   if (quietNow()) { logEvent("Звук: тиша вночі — без сигналу"); return; }
   SndReq r = {(uint8_t)(to == 0 ? 0 : 1), false, -1};
+  sndEnsure();
   if (sq) xQueueSend(sq, &r, 0);
 }
 
@@ -532,6 +570,7 @@ bool sigTest(const String& w, int vol) {
   }
   if (w == "lost" || w == "back") {
     if (!S.sndType || !sq) return false;
+    sndEnsure();
     sndAbort = true;                              // перервати поточне
     xQueueReset(sq);
     SndReq r = {(uint8_t)(w == "back" ? 1 : 0), true, (int8_t)(vol >= 0 && vol <= 100 ? vol : -1)};
@@ -551,46 +590,45 @@ bool sigSoundBegin(int which) {
   upErr = "";
   upLen = 0;
   upWhich = which ? 1 : 0;
-  if (!fsOk) {
-    //  Перший свій звук: розділ для файлів ще не розмічено — розмічаємо (явна дія власника, не сам прилад).
-    fsOk = LittleFS.begin(true, "/littlefs", 4, "spiffs");
-    logEvent(fsOk ? "Пам'ять для звуків розмічено" : "ПОМИЛКА: пам'ять для звуків не розмічається");
-    if (!fsOk) { upErr = "Пам'ять для звуків недоступна"; return false; }
-  }
+  //  Перший свій звук: розділ для файлів ще не розмічено — розмічаємо (явна дія власника, не сам прилад).
+  bool was = fsOk;
+  if (!fsUse(true)) { logEvent("ПОМИЛКА: пам'ять для звуків не розмічається"); upErr = "Пам'ять для звуків недоступна"; return false; }
+  if (!was) logEvent("Пам'ять для звуків розмічено");
   up = LittleFS.open("/new.u8", "w");
-  if (!up) { upErr = "Не вдалося відкрити файл"; return false; }
+  if (!up) { fsDone(); upErr = "Не вдалося відкрити файл"; return false; }
   return true;
 }
 bool sigSoundWrite(const uint8_t* d, size_t n) {
   if (!up) return false;
-  if (upLen + n > SIG_MAX_PCM) { up.close(); LittleFS.remove("/new.u8"); upErr = "Звук задовгий: до 3 секунд"; return false; }
-  if (up.write(d, n) != n) { up.close(); LittleFS.remove("/new.u8"); upErr = "Не вдалося записати — бракує місця"; return false; }
+  if (upLen + n > SIG_MAX_PCM) { up.close(); LittleFS.remove("/new.u8"); fsDone(); upErr = "Звук задовгий: до 3 секунд"; return false; }
+  if (up.write(d, n) != n) { up.close(); LittleFS.remove("/new.u8"); fsDone(); upErr = "Не вдалося записати — бракує місця"; return false; }
   upLen += n;
   return true;
 }
 bool sigSoundEnd(String& err) {
   if (!up) { err = upErr.length() ? upErr : String("Файл не отримано"); return false; }
   up.close();
-  if (upLen < 1600) { LittleFS.remove("/new.u8"); err = "Звук закороткий: щонайменше 0,1 с"; return false; }
+  if (upLen < 1600) { LittleFS.remove("/new.u8"); fsDone(); err = "Звук закороткий: щонайменше 0,1 с"; return false; }
   LittleFS.remove(sndFile(upWhich));
-  if (!LittleFS.rename("/new.u8", sndFile(upWhich))) { err = "Не вдалося зберегти файл"; return false; }
+  bool ok = LittleFS.rename("/new.u8", sndFile(upWhich));
+  fsSizes();
+  fsDone();
+  if (!ok) { err = "Не вдалося зберегти файл"; return false; }
   logEvent(String("Свій звук ") + (upWhich ? "«світло є»" : "«світло зникло»") + ": " + String(upLen * 10 / FS / 10.0f, 1) + " с");
   return true;
 }
-void sigSoundAbort() { if (up) { up.close(); LittleFS.remove("/new.u8"); } }
+void sigSoundAbort() { if (up) { up.close(); LittleFS.remove("/new.u8"); fsDone(); } }
 bool sigSoundDelete(int which) {
-  if (!fsOk) return false;
+  if (!fsOk || !fsUse(false)) return false;
   bool ok = LittleFS.remove(sndFile(which ? 1 : 0));
+  fsSizes();
+  fsDone();
   if (ok) logEvent(String("Свій звук ") + (which ? "«світло є»" : "«світло зникло»") + " видалено");
   return ok;
 }
 
 String sigJson() {
-  size_t a = 0, b = 0;
-  if (fsOk) {
-    File f = LittleFS.open("/lost.u8", "r"); if (f) { a = f.size(); f.close(); }
-    f = LittleFS.open("/back.u8", "r"); if (f) { b = f.size(); f.close(); }
-  }
+  size_t a = szSnd[0], b = szSnd[1];
   return String("{\"led\":") + String((int)ledMode) +
          ",\"test\":" + (testUntil ? "true" : "false") + ",\"busy\":" + (sndBusy ? "true" : "false") +
          ",\"quiet\":" + (quietNow() ? "true" : "false") + ",\"night\":" + (nightNow() ? "true" : "false") +
@@ -599,9 +637,19 @@ String sigJson() {
          ",\"last\":\"" + jsonEsc(lastPlayed) + "\"}";
 }
 
+//  1.0.38: задача звуку (стек 6 КБ) — лише коли звук увімкнено; вимкнули — завершується сама, коли дограє
+static void sndEnsure() {
+  if (S.sndType && !sndH && sq) {
+    if (xTaskCreatePinnedToCore(sndTask, "snd", 6144, nullptr, 2, &sndH, ARDUINO_RUNNING_CORE) != pdPASS) {
+      sndH = nullptr;
+      logEvent("Звук: бракує пам'яті для задачі звуку");
+    }
+  }
+}
 static int prevSnd = -1, prevDac = -1;
 void sigReload() {
   ledInit();
+  sndEnsure();
   if (prevSnd >= 0 && prevSnd != S.sndPin) pinIdle(prevSnd);
   if (prevDac >= 0 && prevDac != S.dacPin) pinIdle(prevDac);
   if (S.sndType == 1 || S.sndType == 2) pinIdle(S.sndPin);
@@ -611,10 +659,9 @@ void sigReload() {
 }
 
 void sigBegin() {
-  for (int i = 0; i < 1024; i++) sinT[i] = sinf(i * 6.2831853f / 1024.0f);
   for (int i = 0; i < 256; i++) gam[i] = (uint8_t)lroundf(255.0f * powf(i / 255.0f, 2.2f));
-  fsOk = LittleFS.begin(false, "/littlefs", 4, "spiffs");     // без розмітки: розмічаємо лише за першим своїм звуком
+  fsMtx = xSemaphoreCreateMutex();
+  if (fsUse(false)) { fsSizes(); fsDone(); }      // без розмітки: розмічаємо лише за першим своїм звуком; розміри — раз
   sq = xQueueCreate(4, sizeof(SndReq));
-  xTaskCreatePinnedToCore(sndTask, "snd", 6144, nullptr, 2, nullptr, ARDUINO_RUNNING_CORE);
   sigReload();
 }

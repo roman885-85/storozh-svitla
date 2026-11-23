@@ -4,6 +4,7 @@
 #
 #   tools/flash.sh mist  [--port /dev/cu.…] [--new]
 #   tools/flash.sh mayak [--port /dev/cu.…] [--new] [--wifi "назва точки" "пароль"]
+#   tools/flash.sh bms   [--port /dev/cu.…] [--new]   — міст батареї JK BMS (ESP32-C3, 1.0.36)
 #   Пароль у командному рядку видно в історії оболонки — краще прошити без --wifi, а мережу задати окремо:
 #   venv/bin/python tools/mayak_wifi.py /dev/cu.usbmodem… "AVR-mist-XXXX"  (питає пароль і не показує його)
 #   tools/flash.sh mist --app build/mist/avr-mist-1.0.5-app.bin      — записати саме цю версію (відкат)
@@ -29,7 +30,7 @@ while [ $# -gt 0 ]; do
     *) echo "Невідомий параметр: $1"; exit 2 ;;
   esac
 done
-case "$ROLE" in mist) WANT="ESP32" ;; mayak) WANT="ESP32-C3" ;; *) echo "Вкажіть, що прошивати: mist або mayak"; exit 2 ;; esac
+case "$ROLE" in mist) WANT="ESP32" ;; mayak|bms) WANT="ESP32-C3" ;; *) echo "Вкажіть, що прошивати: mist, mayak або bms"; exit 2 ;; esac
 
 if [ -z "$PORT" ]; then
   CANDS=( $(ls /dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/cu.SLAB_USBtoUART* /dev/cu.usbmodem* 2>/dev/null || true) )
@@ -60,10 +61,12 @@ if [ "$ROLE" = mist ]; then
   DIR="$ROOT/build/mist"; NAME=avr-mist; BOOT=0x1000; ECHIP=esp32
 else
   case "$PORT" in */cu.usbmodem*) V=usb ;; *) V=uart ;; esac
-  DIR="$ROOT/build/mayak-$V"; NAME=avr-mayak; BOOT=0x0; ECHIP=esp32c3
-  echo "    варіант маячка: $V"
+  if [ "$ROLE" = bms ]; then DIR="$ROOT/build/bms-$V"; NAME=avr-bms; else DIR="$ROOT/build/mayak-$V"; NAME=avr-mayak; fi
+  BOOT=0x0; ECHIP=esp32c3
+  echo "    варіант плати: $V"
 fi
 VER="$(tr -d ' \n\r' < "$ROOT/firmware/VERSION")"
+[ "$ROLE" = bms ] && VER="$(tr -d ' \n\r' < "$ROOT/firmware/VERSION-bms")"
 if [ -n "$APP" ]; then
   [ "$NEW" = 1 ] && { echo "--app і --new разом не можна: нова плата — лише повний образ"; exit 2; }
   [ -f "$APP" ] || { echo "Немає файлу $APP"; exit 6; }
@@ -98,6 +101,6 @@ fi
 
 echo ">>> перевіряю запуск (відкриття порту перезапускає плату)"
 #  до 1.0.10 рядок запуску «Запуск АВР-моста …», з 1.0.11 — «Запуск «Сторожа світла» …»
-if [ "$ROLE" = mist ]; then WANTLINE="Запуск (АВР-моста|«Сторожа світла») ${VER//./\\.}"; else WANTLINE="АВР-маячок ${VER//./\\.}"; fi
+if [ "$ROLE" = mist ]; then WANTLINE="Запуск (АВР-моста|«Сторожа світла») ${VER//./\\.}"; elif [ "$ROLE" = bms ]; then WANTLINE="Міст батареї ${VER//./\\.}"; else WANTLINE="АВР-маячок ${VER//./\\.}"; fi
 "$PY" "$ROOT/tools/boot_check.py" "$PORT" "$WANTLINE" 45 || { echo "!!! ЗАПИСАНО, АЛЕ ПЛАТА НЕ ЗАПУСТИЛАСЬ — не готово"; exit 8; }
 echo ">>> готово: $ROLE $VER на $MAC, запуск перевірено"

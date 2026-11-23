@@ -70,6 +70,10 @@ struct Settings {
   //  (на зв'язку — генератор працює), l — на лінії чи фазі (на зв'язку — на ній є напруга), v — лише показувати.
   //  Порожньо — як до 1.0.23: будь-який маячок — генератор, якщо стоїть mayakOn.
   String beacons;
+  //  Батарея (1.0.36): міст батареї (ESP32-C3 біля JK BMS) шле дані; сповіщати про батарею — галочка власника
+  bool   bmsOn;
+  //  1.0.38: назва http://avr-mist.local у мережі роутера (mDNS) — типово вимкнено: ~8 КБ пам'яті й окрема задача
+  bool   mdnsOn;
 };
 extern Settings S;
 
@@ -95,11 +99,14 @@ enum : uint16_t {
   RF_LINE = 0x040,   // маячки на лініях і фазах (1.0.23)
   RF_NIGHT = 0x080,  // уночі без звуку
   RF_ADMIN = 0x100,  // адміністратор: заявки нових людей, «👥 Користувачі», «📋 Журнал», службові попередження
+  RF_BAT = 0x200,    // батарея: заряд, «вистачить на…», тривоги BMS (1.0.36); адміністратори отримують і без неї
 };
-constexpr uint16_t RF_CATS = RF_LIGHT | RF_GEN | RF_SCHED | RF_SUM | RF_SYS | RF_LINE;
+constexpr uint16_t RF_CATS = RF_LIGHT | RF_GEN | RF_SCHED | RF_SUM | RF_SYS | RF_LINE | RF_BAT;
 constexpr uint16_t RF_DEFAULT = RF_ON | RF_CATS;
 struct Chat { long long id; String name; uint16_t fl = RF_DEFAULT; };
 bool   settingsSaveChats();          // лише одержувачі (зміна з бота чи сторінки — один ключ у флеш)
 bool   settingsSaveBeacons();        // лише маячки й mayakOn (кнопки в таблиці маячків, 1.0.23)
+bool   settingsSaveBms();            // лише bmsOn (галочка в картці «Батарея», 1.0.36)
+bool   settingsSaveSch();            // лише schOn (кнопка на картці «Графік відключень», 1.0.37)
 int    parseChats(const String& s, Chat* out, int maxN);
 String chatsToText(const Chat* c, int n);

@@ -11,16 +11,77 @@
 #include "lcd.h"
 #include "box.h"
 #include "tlspool.h"
+#include "bms.h"
+#include "mem.h"
+#include "crash.h"
+#include "webguard.h"
+#include <WiFi.h>
+#include <WiFiClient.h>
 #include <WebServer.h>
 #include <esp_rom_crc.h>
 #include <Update.h>
 #include <esp_random.h>
+#include <lwip/sockets.h>
 
 extern const char INDEX_HTML[];
 extern const char LOGIN_HTML[];
 extern const char SCHEMES_HTML[];
 
-static WebServer srv(80);
+//  1.0.42: сервер сторінки, що не тримає основний цикл. 23.11.2026 о 12:04:56 Сторожа 1.0.40 перезапустив сторож задач;
+//  дамп збою показав, де 30 с стояла основна задача: hState → sendContent → NetworkClient::write. Клієнт сторінки
+//  (браузер через роутер) перестав приймати дані — тієї ж хвилини й Telegram не міг під'єднатись, — а ядро на кожен
+//  запис чекає до 10 с (10 разів select по 1 с), і кожна частина відповіді — це три записи (розмір, дані, кінець
+//  рядка). Тепер перед кожним записом — чи приймає клієнт (до 1,5 с), і на всю відповідь — до 10 с від першого
+//  запису; ні — з'єднання закриваємо, решта відповіді нікуди не йде, основний цикл іде далі.
+//  Частини відповідей тут малі (стан — до ~600 Б, сторінка — по 1460 Б), а «приймає» в lwIP означає ≥ ~2,8 КБ
+//  вільного місця для відправки, тож сам запис після перевірки вже не чекає.
+class GuardedServer : public WebServer {
+ public:
+  explicit GuardedServer(int port) : WebServer(port) {}
+  void arm() { g.arm(); }                        // перед кожним handleClient(): новий запит — новий відлік
+  uint32_t drops = 0;                            // скільки відповідей обірвано від запуску
+ protected:
+  size_t _currentClientWrite(const char* b, size_t l) override { return ready() ? _currentClient.write(b, l) : 0; }
+  size_t _currentClientWrite_P(PGM_P b, size_t l) override { return ready() ? _currentClient.write_P(b, l) : 0; }
+ private:
+  WebGuard g;                                    // 1.0.43: відлік часу — webguard.h (перевірка на Mac: tests/webguard)
+  int64_t noteUs = 0;
+  bool ready() {
+    if (g.dead) return false;
+    int fd = _currentClient.fd();
+    if (fd < 0) return false;
+    uint32_t w = g.budget(millis());
+    bool ok = w > 0;
+    if (ok) {
+      fd_set s;
+      FD_ZERO(&s);
+      FD_SET(fd, &s);
+      timeval tv = { (time_t)(w / 1000), (suseconds_t)((w % 1000) * 1000) };
+      ok = select(fd + 1, nullptr, &s, nullptr, &tv) > 0 && FD_ISSET(fd, &s);
+    }
+    if (!ok) {
+      g.dead = true;
+      drops++;
+      String who = _currentClient.remoteIP().toString();
+      _currentClient.stop();
+      int64_t n = nowUs();
+      if (!noteUs || n - noteUs > 600000000LL) {    // у журнал — не частіше разу на 10 хв (лічильник — у «Пам'ять»)
+        noteUs = n;
+        logEvent("Сторінка: " + who + " не приймав відповідь на " + uri() + " — з'єднання закрито, щоб не стояла робота Сторожа");
+      }
+    }
+    return ok;
+  }
+};
+static GuardedServer srv(80);
+
+//  1.0.42: велика сторінка — шматками по 1460 Б (один сегмент TCP): кожен шматок проходить перевірку вище
+static void sendBig(const char* type, const char* p, size_t n) {
+  srv.sendHeader("Cache-Control", "no-store");
+  srv.setContentLength(n);
+  srv.send(200, type, "");
+  for (size_t off = 0; off < n; off += 1460) srv.sendContent_P(p + off, n - off < 1460 ? n - off : 1460);
+}
 static bool restartPending = false;
 static uint32_t restartAt = 0;
 static bool upAuth = false, upChipOk = true;
@@ -263,9 +324,10 @@ static void hPhotoUpload() {
     int total = srv.clientContentLength();
     if (total <= 0 || total > (int)PH_MAX + 1024) return phDrop("Картинка завелика: до 72 КБ");
     phCap = phJpg + (size_t)total + strlen(PH_TAIL);
-    if (ESP.getMaxAllocHeap() < phCap || ESP.getFreeHeap() < phCap + 50000)
-      return phDrop("На платі мало пам'яті для картинки (вільно " + String(ESP.getFreeHeap() / 1024) + " КБ, шматок " +
-                    String(ESP.getMaxAllocHeap() / 1024) + " КБ) — спробуйте ще раз за хвилину");
+    //  1.0.38: справжні цифри пам'яті (mem.h); на шифроване з'єднання лишаємо 24 КБ — його буфери тепер у запасі TLS
+    if (memBlock() < phCap || memFree() < phCap + 24000)
+      return phDrop("На платі мало пам'яті для картинки (вільно " + String(memFree() / 1024) + " КБ, цілий шматок " +
+                    String(memBlock() / 1024) + " КБ, а потрібно " + String((unsigned)(phCap / 1024 + 1)) + " КБ) — візьміть меншу картинку");
     phBuf = (uint8_t*)malloc(phCap);
     if (!phBuf) return phDrop("На платі мало пам'яті для картинки");
     memcpy(phBuf, h.c_str(), phJpg);
@@ -511,8 +573,7 @@ static bool tokenOk(const String& t) {
 
 static void hIndex() {
   if (!authOk()) return loginPage(200, String());
-  srv.sendHeader("Cache-Control", "no-store");
-  srv.send_P(200, "text/html; charset=utf-8", INDEX_HTML);
+  sendBig("text/html; charset=utf-8", INDEX_HTML, strlen(INDEX_HTML));
 }
 
 //  1.0.20: стан частинами (chunked), а не одним рядком на 8–16 КБ. 18.11 о 22:09 через віддалену адресу один запит
@@ -524,7 +585,9 @@ static void hState() {
   srv.setContentLength(CONTENT_LENGTH_UNKNOWN);
   srv.send(200, "application/json; charset=utf-8", "");
   srv.sendContent("{\"ver\":\"" FW_VERSION "\",\"build\":\"" FW_BUILD "\",\"up\":" + String((long)(nowUs() / 1000000)) +
-                  ",\"heap\":" + String(ESP.getFreeHeap()) + ",\"minHeap\":" + String(ESP.getMinFreeHeap()) + ",\"maxBlock\":" + String(ESP.getMaxAllocHeap()) +
+                  //  1.0.38: справжня вільна пам'ять (mem.h) — без ~32 КБ пам'яті команд, які рахувало ядро
+                  ",\"heap\":" + String(memFree()) + ",\"minHeap\":" + String(memMin()) + ",\"maxBlock\":" + String(memBlock()) +
+                  ",\"recentHeap\":" + String(memMinRecent()) +
                   ",\"reset\":\"" + jsonEsc(resetReasonText()) + "\",\"clock\":\"" + jsonEsc(fmtNowFull()) + "\"" +
                   ",\"you\":\"" + srv.client().remoteIP().toString() + "\"");
   srv.sendContent(",\"watch\":" + watchJson());
@@ -534,11 +597,16 @@ static void hState() {
   srv.sendContent(",\"sig\":" + sigJson());
   srv.sendContent(",\"sch\":" + schJson());
   srv.sendContent(",\"tls\":" + tlsPoolJson());          // 1.0.32: запас пам'яті для TLS
+  String bj = bmsJson();                                   // 1.0.36: батарея — лише коли міст озивався чи сповіщення ввімкнено
+  if (bj.length()) srv.sendContent(",\"bat\":" + bj);
   //  1.0.33: журнал — лише коли сторінка на вкладці «Журнал» (?log=1). Сторінка питає стан кожні 3 с; журнал робив
   //  відповідь у 3–4 рази більшою — це пам'ять Wi-Fi і TCP саме тоді, коли з'єднанню з Telegram її бракувало.
   if (srv.hasArg("log")) {
+    srv.sendContent(",\"mem\":" + memJson());            // 1.0.38: подробиці пам'яті — теж лише тут
+    srv.sendContent(",\"crash\":" + String((unsigned)crashSize()));   // 1.0.41: дамп збою у флеші, Б (0 — немає)
+    srv.sendContent(",\"drops\":" + String(srv.drops));                // 1.0.42: обірвані відповіді сторінки
     srv.sendContent(",\"log\":[");                       // 1.0.32: по одному запису — без рядка на 10–20 КБ
-    for (int i = 0; i < 60; i++) {
+    for (int i = 0; i < 150; i++) {                      // 1.0.38: журнал у пам'яті команд уміщає ~250 рядків (було 80)
       String e = logEntryJson(i);
       if (!e.length()) break;
       srv.sendContent(i ? "," + e : e);
@@ -554,7 +622,7 @@ static void hSettingsGet() {
   String hint = S.tgToken.length() ? S.tgToken.substring(0, S.tgToken.indexOf(':') > 0 ? S.tgToken.indexOf(':') : 0) + ":…" : String();
   String o = "{\"obj\":\"" + jsonEsc(S.objName) + "\",\"staSsid\":\"" + jsonEsc(S.staSsid) + "\",\"staPassSet\":" + b(S.staPass.length()) + ",\"staBssid\":\"" + jsonEsc(S.staBssid) + "\"" +
              ",\"apSsid\":\"" + jsonEsc(S.apSsid) + "\",\"tgTokenSet\":" + b(S.tgToken.length()) + ",\"tgTokenHint\":\"" + jsonEsc(hint) +
-             "\",\"tgChats\":\"" + jsonEsc(S.tgChats) + "\",\"avrMac\":\"" + jsonEsc(S.avrMac) + "\",\"mayakOn\":" + b(S.mayakOn) +
+             "\",\"tgChats\":\"" + jsonEsc(S.tgChats) + "\",\"avrMac\":\"" + jsonEsc(S.avrMac) + "\",\"mayakOn\":" + b(S.mayakOn) + ",\"mdnsOn\":" + b(S.mdnsOn) +
              ",\"notifyStart\":" + b(S.notifyStart) + ",\"offSec\":" + String(S.offSec) + ",\"onSec\":" + String(S.onSec) +
              ",\"lineOffSec\":" + String(S.lineOffSec) + ",\"lineOnSec\":" + String(S.lineOnSec) + ",\"lineWarnSec\":" + String(S.lineWarnSec) + ",\"genRemMin\":" + String(S.genRemMin) +
              ",\"sumOn\":" + b(S.sumOn) + ",\"sumHour\":" + String(S.sumHour) +
@@ -609,6 +677,7 @@ static void hSettingsPost() {
     if (n.avrMac.length() && n.avrMac != S.avrMac && isRequesterDevice(x)) return fail(OWN_DEVICE_ERR);
   }
   if (srv.hasArg("mayakOn")) n.mayakOn = srv.arg("mayakOn") == "1";
+  if (srv.hasArg("mdnsOn")) n.mdnsOn = srv.arg("mdnsOn") == "1";
   if (srv.hasArg("notifyStart")) n.notifyStart = srv.arg("notifyStart") == "1";
   if (srv.hasArg("sumOn")) n.sumOn = srv.arg("sumOn") == "1";
   if (srv.hasArg("sumHour")) { long h = srv.arg("sumHour").toInt(); if (h < 0 || h > 23) return fail("Година підсумку — від 0 до 23"); n.sumHour = (uint8_t)h; }
@@ -662,6 +731,7 @@ static void hSettingsPost() {
   }
   tgReload();
   schReload();
+  bridgeMdns();
   logEvent(wifi ? "Налаштування збережено, перезапуск для Wi-Fi" : "Налаштування збережено");
   if (wifi) scheduleRestart(1500, "зміна Wi-Fi у налаштуваннях");
   json(String("{\"ok\":true,\"restart\":") + b(wifi) + "}");
@@ -728,7 +798,7 @@ static void hChatFlags() {
   if (!auth()) return;
   long long v = strtoll(srv.arg("id").c_str(), nullptr, 10);
   long f = srv.arg("fl").toInt();
-  if (!v || f < 0 || f > 0x1FF) return fail("Хибні дані");
+  if (!v || f < 0 || f > 0x3FF) return fail("Хибні дані");
   Chat c[MAXR];
   int k = parseChats(S.tgChats, c, MAXR), i = -1;
   for (int j = 0; j < k; j++) if (c[j].id == v) i = j;
@@ -760,6 +830,134 @@ static void hBeacon() {
   if (!settingsSaveBeacons()) return fail("Не вдалося записати налаштування");
   logEvent("Маячок " + macToStr(m) + (del ? String(" прибрано зі списку") : " — " + String(role == "g" ? "генератор" : role == "l" ? "лінія" : "лише показувати") +
                                        (name.length() ? ", «" + name + "»" : String())) + " (зі сторінки)");
+  json("{\"ok\":true}");
+}
+
+//  Сторінка мосту батареї через Сторожа (1.0.39): /bms/… → http://<адреса мосту в мережі Сторожа>/…
+//  Міст стоїть за Сторожем (мережа 10.77.0.x) — з мережі церкви чи через KeenDNS до нього не дістатись, а його
+//  налаштування (дисплей, яку BMS слухати) власник шукає тут, на сторінці Сторожа. Вхід — той самий, що й на Сторожа.
+//  Запит — з параметрами форми; відповідь мосту віддаємо шматками по 512 Б, тож пам'яті це майже не бере.
+static String urlEnc(const String& s) {
+  static const char HX[] = "0123456789ABCDEF";
+  String o;
+  for (unsigned i = 0; i < s.length(); i++) {
+    uint8_t c = (uint8_t)s[i];
+    if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') o += (char)c;
+    else { o += '%'; o += HX[c >> 4]; o += HX[c & 15]; }
+  }
+  return o;
+}
+//  1.0.41: дамп збою з флешу — цілим файлом, для розбору на комп'ютері (esp-coredump тим ELF, що впав)
+static void hCrashBin() {
+  if (!auth()) return;
+  size_t n = crashSize();
+  if (!n) { srv.send(404, "text/plain; charset=utf-8", "Дампу збою у флеші немає"); return; }
+  uint8_t* buf = (uint8_t*)malloc(1024);
+  if (!buf) { srv.send(503, "text/plain; charset=utf-8", "Мало пам'яті, спробуйте за хвилину"); return; }
+  srv.sendHeader("Cache-Control", "no-store");
+  srv.sendHeader("Content-Disposition", "attachment; filename=\"storozh-crash.bin\"");   // дамп — від тієї версії, що впала
+  srv.setContentLength(n);
+  srv.send(200, "application/octet-stream", "");
+  for (size_t off = 0; off < n;) {
+    size_t k = n - off < 1024 ? n - off : 1024;
+    if (!crashRead(off, buf, k)) break;
+    srv.sendContent((const char*)buf, k);
+    off += k;
+  }
+  free(buf);
+}
+
+static void hBmsProxy() {
+  String uri = srv.uri();
+  if (uri == "/bms") { srv.sendHeader("Location", "/bms/"); srv.send(302, "text/plain", ""); return; }
+  String path = uri.substring(4);
+  if (!authOk()) {
+    if (path == "/") return loginPage(401, String());
+    json("{\"err\":\"Потрібен вхід на сторінку Сторожа\",\"login\":true}", 401);
+    return;
+  }
+  uint32_t ip = bmsBridgeIp();
+  if (!ip) { srv.send(502, "text/plain; charset=utf-8", "Міст батареї не на зв'язку зі Сторожем"); return; }
+  String form;
+  for (int i = 0; i < srv.args(); i++) {
+    if (srv.argName(i) == "plain") continue;
+    form += String(form.length() ? "&" : "") + urlEnc(srv.argName(i)) + "=" + urlEnc(srv.arg(i));
+  }
+  bool post = srv.method() == HTTP_POST;
+  WiFiClient c;
+  if (!c.connect(IPAddress(ip), 80, 2500)) { srv.send(502, "text/plain; charset=utf-8", "Міст батареї не відповідає"); return; }
+  String rq = String(post ? "POST " : "GET ") + path + (!post && form.length() ? "?" + form : String()) + " HTTP/1.0\r\nHost: bridge\r\nConnection: close\r\n";
+  if (post) rq += "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: " + String(form.length()) + "\r\n";
+  rq += "\r\n";
+  if (post) rq += form;
+  c.print(rq);
+  //  заголовки відповіді: код і тип вмісту
+  uint32_t t0 = millis();
+  int code = 0;
+  String ctype = "text/plain; charset=utf-8", line;
+  bool head = true;
+  while (head && millis() - t0 < 6000 && (c.connected() || c.available())) {
+    if (!c.available()) { delay(2); continue; }
+    char ch = (char)c.read();
+    if (ch == '\r') continue;
+    if (ch != '\n') { if (line.length() < 200) line += ch; continue; }
+    if (!line.length()) { head = false; break; }
+    if (!code && line.startsWith("HTTP/")) code = line.substring(9, 12).toInt();
+    else if (line.length() > 13 && line.substring(0, 13).equalsIgnoreCase("Content-Type:")) { ctype = line.substring(13); ctype.trim(); }
+    line = "";
+  }
+  if (head || code < 100) { c.stop(); srv.send(502, "text/plain; charset=utf-8", "Міст батареї не відповів вчасно"); return; }
+  srv.sendHeader("Cache-Control", "no-store");
+  srv.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  srv.send(code, ctype, "");
+  uint8_t buf[512];
+  while (millis() - t0 < 9000 && (c.connected() || c.available())) {
+    int n = c.available() ? c.read(buf, sizeof buf) : 0;
+    if (n > 0) srv.sendContent((const char*)buf, (size_t)n);
+    else delay(2);
+  }
+  c.stop();
+  srv.sendContent("");
+}
+//  Тримати міст батареї поза точкою sec секунд (1.0.39, bridge.h: bridgeKick) — щоб у мосту ввімкнулась сторінка
+//  налаштування, коли поруч нікого немає натиснути BOOT. Кнопки на сторінці немає: службова дія.
+static void hBmsKick() {
+  if (!auth()) return;
+  long sec = srv.arg("sec").toInt();
+  uint8_t m[6];
+  if (sec < 0 || sec > 300) return fail("Від 0 до 300 секунд");
+  if (!bmsBridgeMac(m)) return fail("Мосту батареї від запуску не було");
+  bridgeKick(m, (int)sec);
+  logEvent(sec ? "Міст батареї " + macToStr(m) + ": тримаю поза точкою " + String(sec) + " с (щоб у мосту ввімкнулась сторінка налаштування)"
+               : "Міст батареї " + macToStr(m) + ": більше не тримаю поза точкою");
+  json("{\"ok\":true}");
+}
+
+//  Графік YASNO (1.0.37): вимикач на картці «Графік відключень» — власник: «функцию отключения для ясно, для экономии
+//  памяти и повышения стабильности работы». Вимкнений — жодних запитів до app.yasno.ua (кожен бере ~50 КБ на шифрування
+//  й рве з'єднання з Telegram). У флеш — лише schOn (дія власника).
+static void hSch() {
+  if (!auth()) return;
+  bool on = srv.arg("on") == "1";
+  if (on && !S.schQueue.length()) return fail("Спершу виберіть свою чергу: «Налаштування» → «Графік відключень YASNO»");
+  if (on != S.schOn) {
+    S.schOn = on;
+    if (!settingsSaveSch()) return fail("Не вдалося записати налаштування");
+    schReload();
+    logEvent(String("Графік YASNO ") + (on ? "увімкнено" : "вимкнено: Сторож не звертається до YASNO") + " (зі сторінки)");
+  }
+  json("{\"ok\":true}");
+}
+
+//  Батарея (1.0.36): галочка «Сповіщати про батарею» з картки «Батарея». У флеш — лише вона (дія власника).
+static void hBms() {
+  if (!auth()) return;
+  bool on = srv.arg("on") == "1";
+  if (on != S.bmsOn) {
+    S.bmsOn = on;
+    if (!settingsSaveBms()) return fail("Не вдалося записати налаштування");
+    logEvent(String("Сповіщення про батарею ") + (on ? "ввімкнено" : "вимкнено") + " (зі сторінки)");
+  }
   json("{\"ok\":true}");
 }
 
@@ -907,6 +1105,9 @@ void webBegin() {
   srv.on("/api/delchat", HTTP_POST, hDelChat);
   srv.on("/api/chatflags", HTTP_POST, hChatFlags);
   srv.on("/api/beacon", HTTP_POST, hBeacon);
+  srv.on("/api/bms", HTTP_POST, hBms);
+  srv.on("/api/sch", HTTP_POST, hSch);
+  srv.on("/api/bmskick", HTTP_POST, hBmsKick);
   srv.on("/api/announce", HTTP_POST, hAnnounce);
   srv.on("/api/lcdfx", HTTP_POST, []() {      // пробний ефект на дисплеї (1.0.26): 1 — зникло, 2 — повернулось, 4 — попередження, 5 — оголошення
     if (!auth()) return;
@@ -919,8 +1120,7 @@ void webBegin() {
   });
   srv.on("/schemes", HTTP_GET, []() {     // схеми підключення (1.0.23): вкладка «Інструкція» і окремо для друку
     if (!authOk()) return loginPage(200, String());
-    srv.sendHeader("Cache-Control", "no-store");
-    srv.send_P(200, "text/html; charset=utf-8", SCHEMES_HTML);
+    sendBig("text/html; charset=utf-8", SCHEMES_HTML, strlen(SCHEMES_HTML));
   });
   srv.on("/api/botphoto", HTTP_POST, hPhotoDone, hPhotoUpload);
   srv.on("/api/botname", HTTP_POST, hBotName);
@@ -944,13 +1144,19 @@ void webBegin() {
     if (!lcdTest(iv("vop"), iv("bri"), iv("bllow"), mode, iv("bias"))) return fail("Дисплей не ввімкнено: поставте «Дисплей під'єднано» і натисніть «Зберегти»");
     json("{\"ok\":true}");
   });
+  srv.on("/api/crash", HTTP_GET, []() { if (!auth()) return; json(crashJson()); });   // 1.0.41: підсумок дампу збою
+  srv.on("/api/crash.bin", HTTP_GET, hCrashBin);
   srv.on("/api/schfetch", HTTP_POST, []() { if (!auth()) return; schKick(); json("{\"ok\":true}"); });   // «Оновити графік зараз»
   srv.on("/update", HTTP_POST, hUpdateDone, hUpload);
-  srv.onNotFound([]() { srv.send(404, "text/plain; charset=utf-8", "Немає такої сторінки"); });
+  srv.onNotFound([]() {
+    if (srv.uri() == "/bms" || srv.uri().startsWith("/bms/")) return hBmsProxy();   // 1.0.39: сторінка мосту батареї
+    srv.send(404, "text/plain; charset=utf-8", "Немає такої сторінки");
+  });
   srv.begin();
 }
 
 void webLoop() {
+  srv.arm();                                     // 1.0.42: відлік часу на відповідь — для кожного запиту свій
   srv.handleClient();
   if (restartPending && (int32_t)(millis() - restartAt) >= 0) restartWith(restartWhy, true);   // дія людини
 }

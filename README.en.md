@@ -23,6 +23,10 @@ network and answering means mains is on; off the network or silent means mains i
 A **beacon** is an optional ESP32-C3 plugged into the generator's outlet: online means the generator is running.
 Beacons on individual lines or phases report where voltage is present.
 
+A **battery bridge** (since 1.0.36) is an optional ESP32-C3 next to a battery with a **JK BMS**: it keeps a permanent
+Bluetooth connection to the BMS and every 5 s passes state of charge, voltage, current, cells, temperatures and BMS alarms
+to Storozh. Storozh never connects or writes to the BMS.
+
 ## Features
 
 - **Telegram:** power lost / restored with durations and whether it matches the schedule; generator started, stopped,
@@ -35,6 +39,13 @@ Beacons on individual lines or phases report where voltage is present.
   changes, emergency outages.
 - **Statistics:** hours with and without power per day, week and month; recent outages.
 - **Beacons** (up to 6): generator, line or phase, "display only".
+- **Battery (JK BMS)** via the battery bridge: a battery card; Telegram alerts when charge drops below 50/30/20/10 % or
+  the remaining time falls under 3 h / 1 h while mains is off, BMS alarms, "BMS offline". The bridge page opens through
+  Storozh's page; the bridge drives an Open-Smart 1.8" ST7567 display (128×64) and updates itself over the network from
+  a file URL (http or https) with rollback.
+- **Devices:** a clear list of what is bound to Storozh (router, ATS, beacons, battery bridge) and whether each is online
+  now, plus the other devices on its network with what they are (unlisted beacon, phone, unknown — maybe the ATS) and
+  "add beacon" / "this is the ATS" buttons.
 - **Nokia 5110 display:** big status text, "off since 13:53 / 3 h 5 min already", the schedule as a scrolling line
   (adjustable speed), flashing and blinking on events, announcements; display and wiring self-test from the web page.
 - **On-site signals:** two LEDs or a WS2812B strip (colours, effects, wave), a buzzer or a speaker via the DAC
@@ -48,20 +59,26 @@ Beacons on individual lines or phases report where voltage is present.
   duplicates (before a retry the device checks whether the message is already in the chat). It restarts itself only
   when really stuck, recording the reason and the last log lines in a "black box". Telegram uses one long-lived
   connection, and memory for TLS (2 × 17 KB) is reserved at boot, so on a board without PSRAM a fragmented heap no
-  longer breaks connections. It never writes flash on its own.
+  longer breaks connections. The page shows the real free heap (the Arduino core also counts ~32 KB of instruction RAM
+  ordinary code cannot use); the event log lives in that instruction RAM (250 lines). A browser that stops reading a
+  response no longer holds the device: the connection is closed within seconds. After a crash or a watchdog reset the
+  core dump can be downloaded from the page. It never writes flash on its own (except the core dump ESP-IDF writes on a
+  crash).
 
 ## Build and flash
 
 Arduino-ESP32 **3.3.3** via `arduino-cli`, partition scheme `min_spiffs` (macOS scripts):
 
-    tools/build.sh                 # both firmwares → build/
+    tools/build.sh                 # all firmwares → build/ (Storozh, beacon, battery bridge)
     tools/flash.sh mist --new      # first flash over USB (erases flash, adds the MAC to tools/devices.txt)
     tools/flash.sh mayak --new     # ESP32-C3 beacon
+    tools/flash.sh bms --new       # ESP32-C3 battery bridge
 
 After that, update over the network from the device's page. First setup from a phone: Wi-Fi "AVR-mist-XXXX",
 page http://10.77.0.1.
 
-Host tests (macOS, clang): `tests/watch/run.sh`, `tests/lcd/run.sh`, `tests/yasno/run.sh`.
+Host tests (macOS, clang): `tests/watch`, `tests/lcd`, `tests/yasno`, `tests/bms`, `tests/bat`, `tests/batlcd`,
+`tests/logring`, `tests/webguard`, `tests/devices` (each has `run.sh`).
 
 ## License
 

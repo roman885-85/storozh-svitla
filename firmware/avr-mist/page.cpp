@@ -41,6 +41,7 @@ main{padding:0 12px 28px;max-width:780px;margin:0 auto}
 .big{font-size:21px;font-weight:700;display:flex;align-items:center;gap:10px}
 .dot{flex:none;width:14px;height:14px;border-radius:50%;background:var(--mut)}.on{background:var(--ok)}.off{background:var(--bad)}.gen{background:var(--gen)}
 .row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--bd)}.row:last-child{border:0}.row span:last-child{text-align:right}
+.cells{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}.cells span{font-size:12px;padding:2px 5px;border:1px solid var(--bd);border-radius:6px;font-variant-numeric:tabular-nums}.cells .lo{border-color:var(--bad)}.cells .hi{border-color:#2fa864}
 .mut{color:var(--mut);font-size:13px}
 label{display:block;margin:10px 0 4px;font-size:13px;color:var(--mut)}label.ck{display:flex;gap:8px;align-items:flex-start;color:var(--fg);font-size:14px}
 input,textarea,select{width:100%;padding:9px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
@@ -65,10 +66,17 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
 <section id="st">
  <div class="card"><div class="big"><span id="dot" class="dot"></span><span id="status">Зв'язуюсь зі Сторожем…</span></div><div id="since" class="mut"></div></div>
  <div class="card" id="rows"></div>
+ <div class="card hide" id="batcard"><b>🔋 Батарея</b> <span id="batsub" class="mut"></span><div id="batbody" style="margin-top:6px"></div>
+  <label class="ck" style="margin-top:10px"><input type="checkbox" id="bat_on"> Сповіщати про батарею</label>
+  <div class="mut">Заряд нижче 50, 30, 20, 10 % і «вистачить менше ніж на 3 год / на годину» — коли міського світла немає; тривоги BMS; «BMS не на зв'язку» (15 хв без даних) — адміністраторам. Отримують адміністратори й ті, у кого в сповіщеннях увімкнено «🔋 Батарея». Як у HA.</div></div>
  <div class="card" id="schcard"><b>Графік відключень</b> <span id="schq" class="mut"></span>
-  <div id="schline" style="margin-top:6px"></div><div id="schdays"></div><div id="schinfo" class="mut" style="margin-top:8px"></div></div>
+  <div id="schline" style="margin-top:6px"></div><div id="schdays"></div><div id="schinfo" class="mut" style="margin-top:8px"></div><div id="schbtn"></div></div>
  <div class="card"><details id="stdet"><summary>Статистика світла: скільки було й не було</summary><div id="sttext" class="mut" style="white-space:pre-wrap;margin-top:8px"></div></details></div>
- <div class="card"><b>Пристрої в мережі для АВР</b><div class="tbl"><table id="cl"></table></div><div class="mut" id="clhint"></div></div>
+ <div class="card"><b>Пристрої</b> <span id="dvcnt" class="mut"></span>
+ <div class="mut" style="margin-top:4px">Що прив'язано до Сторожа і чи воно зараз на зв'язку. Нижче — інші пристрої, під'єднані до точки Wi-Fi Сторожа: їх можна прив'язати.</div>
+ <div class="tbl"><table id="dvb"></table></div>
+ <div style="margin-top:14px"><b>Інші пристрої в мережі Сторожа</b></div>
+ <div class="tbl"><table id="cl"></table></div><div class="mut" id="clhint"></div></div>
 </section>
 <section id="tg" class="hide">
  <div class="card"><b>Хто отримує сповіщення</b> <span id="rcount" class="mut"></span>
@@ -231,6 +239,8 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
   <label>Точка роутера (BSSID)</label><input id="f_staBssid" maxlength="17" placeholder="будь-яка: найсильніша">
   <div class="mut">Вибір мережі в списку «Знайти» підставляє адресу саме цієї точки. Сторож триматиметься її, а коли вона недоступна, тимчасово перейде на найсильнішу й повернеться, щойно вона знову з'явиться. Порожньо — будь-яка точка з цією назвою.</div>
   <label>Пароль <span id="h_staPass"></span></label><input id="f_staPass" type="password" placeholder="не змінювати" autocomplete="new-password">
+  <label class="ck" style="margin-top:10px"><input type="checkbox" id="f_mdnsOn"> Назва http://avr-mist.local у мережі роутера (mDNS)</label>
+  <div class="mut">Типово вимкнено: назва забирає близько 8 КБ пам'яті Сторожа. Сторінку відкривають за адресою з рядка «Роутер» на вкладці «Стан» (закріпіть її за Сторожем у роутері) або через KeenDNS.</div>
  </div>
  <div class="card"><b>Точка доступу для АВР</b>
   <label>Назва</label><input id="f_apSsid" maxlength="32">
@@ -245,7 +255,8 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
   <div class="mut" style="margin-top:4px">Маячок — плата ESP32-C3 у розетці: кожні 2 секунди каже Сторожу «я тут» через мережу для АВР. Що означає його мовчання, задає роль:<br>
   <b>Генератор</b> — маячок у розетці від генератора: на зв'язку — генератор працює, мовчить — стоїть. Таких можна кілька, про запас.<br>
   <b>Лінія чи фаза</b> — у розетці потрібної лінії (фаза, корпус, котельня): мовчить — на ній немає напруги. У Telegram прийде «🔌» тим, у кого позначено «Маячки».<br>
-  <b>Лише показувати</b> — видно тут і в «🛠 Сторож» у боті, повідомлень немає.</div>
+  <b>Лише показувати</b> — видно тут і в «🛠 Сторож» у боті, повідомлень немає.<br>
+  Усі пристрої Сторожа і чи вони на зв'язку — на вкладці «Стан», картка «Пристрої»; маячок, що вже шле «я тут», можна додати звідти кнопкою «Додати маячок».</div>
   <div id="bcnleg" class="msg hide"></div>
   <div id="bcn" style="margin-top:6px"></div>
   <label>Додати маячок за MAC-адресою — якщо його зараз немає на зв'язку (адресу видно в журналі Сторожа й у «🛠 Сторож» у боті)</label>
@@ -280,7 +291,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
   <div id="rmsg2"></div>
  </div>
 </section>
-<section id="log" class="hide"><div class="card"><div class="tbl"><table id="lg"></table></div></div></section>
+<section id="log" class="hide"><div class="card mut" id="memline"></div><div class="card"><div class="tbl"><table id="lg"></table></div></div></section>
 <section id="ins" class="hide">
  <div class="card"><b>Інструкція: схеми підключення</b>
   <div class="mut" style="margin-top:4px">Як підключити до Сторожа світлодіоди чи стрічку, бузер чи динамік, кнопку скидання пароля, дисплей Nokia 5110, де ставити маячки й чим живити. Номери виводів на схемах — як задано на вкладці «Сигнали». <a href="/schemes" target="_blank" rel="noopener">Відкрити окремою сторінкою</a> — так зручніше друкувати.</div></div>
@@ -302,6 +313,56 @@ function note(id,text,bad){const e=$(id);e.className='msg'+(bad?' err':'');e.tex
 function relogin(){let t=0;try{t=+sessionStorage.getItem('rl')||0}catch(e){}if(Date.now()-t<10000)return;try{sessionStorage.setItem('rl',String(Date.now()))}catch(e){}location.reload()}
 async function j(u,o){const r=await fetch(u,Object.assign({credentials:'same-origin'},o));if(r.status===401){relogin();throw new Error('Потрібен вхід: оновіть сторінку')}const t=await r.text();let d;try{d=JSON.parse(t)}catch(e){d={err:t}}if(!r.ok)throw new Error(d.err||('HTTP '+r.status));return d}
 async function refresh(){try{render(await j('/api/state'+(tab==='log'?'?log=1':'')))}catch(e){$('status').textContent=e.message.startsWith('Потрібен вхід')?e.message:'Немає зв\'язку зі Сторожем';$('dot').className='dot'}}
+//  1.0.42: «Пристрої». Власник 23.11.2026: «должен быть четкий список того что подвязано и подключено а также устройства
+//  которые есть в сети для подключения (которые он знает — авр, маяк, бмс или другое)». До того тут була лише таблиця
+//  клієнтів точки: прив'язаний АВР без зв'язку й маячок, що мовчить, у ній не з'являлись, а міст батареї й не доданий
+//  маячок стояли як «невідомі» з кнопкою «Це АВР».
+function renderDev(d){
+ const w=d.watch,n=d.net,BL=(w.bcn&&w.bcn.list)||[],cl=n.clients||[],you=d.you||'',bat=d.bat,C={};
+ for(const x of cl)C[x.mac]=x;
+ const avr=(w.avr.mac||'').toLowerCase(),bm=bat&&bat.mac?bat.mac.toLowerCase():'';
+ const ok=t=>'<b style="color:var(--ok);white-space:nowrap">● '+t+'</b>',bad=t=>'<b class="err" style="white-space:nowrap">● '+t+'</b>',gr=t=>'<b class="mut" style="white-space:nowrap">● '+t+'</b>',sm=t=>t?'<br><span class="mut">'+t+'</span>':'';
+ const ad=(m,x)=>m?'<br><span class="mut" style="font-size:12px">'+esc(m)+(x&&x.ip?' · '+esc(x.ip):'')+'</span>':'',sg=x=>x&&x.assoc?x.rssi+' дБм':'';
+ const isY=x=>!!(x&&x.assoc&&x.ip&&x.ip===you),isR=m=>(parseInt(m.slice(0,2),16)&2)!==0;
+ let h='<tr class="mut"><td>Пристрій · MAC, адреса</td><td>Стан</td></tr>',nb=0,on=0;
+ const s=n.sta||{};
+ h+='<tr><td><b>Роутер</b>'+sm(esc(s.ssid||'не задано')+' · інтернет')+ad(s.bssid||'',null)+'</td><td>'+(s.up?ok('під\'єднано')+sm('сигнал '+s.rssi+' дБм'+(s.pref===false?' · <b class="err">не бажана точка</b>':'')+(s.ip?' · адреса Сторожа '+esc(s.ip):'')):bad('немає зв\'язку'))+'</td></tr>';
+ if(!w.avr.assigned)h+='<tr><td><b>АВР</b></td><td>'+bad('не прив\'язано')+sm('підключіть АВР у застосунку eWeLink до точки «'+esc(n.ap.ssid)+'» і натисніть «Це АВР» у його рядку нижче')+'</td></tr>';
+ else{const x=C[avr];let st;nb++;
+  if(x&&x.assoc){on++;st=x.ping!=null&&x.ping<=10?ok('на зв\'язку')+sm('у мережі, відповідає на ping · '+sg(x)):gr('у мережі, на ping не відповідає')+sm(sg(x))}
+  else st=bad('не на зв\'язку')+sm((x?'від\'єднався '+ago(x.seen)+' тому':'не під\'єднувався від запуску Сторожа')+(w.grid.st===0?' · міського світла немає'+(w.grid.exact?' з '+esc(w.grid.at):''):''));
+  if(isY(x))st+=sm('<b class="err">це пристрій, з якого відкрито сторінку, — не АВР</b>');
+  else if(isR(avr))st+=sm('<b class="err">адреса схожа на телефон чи комп\'ютер, а не на АВР</b>');
+  h+='<tr><td><b>АВР</b>'+sm('прив\'язано')+ad(avr,x)+'</td><td>'+st+'</td></tr>'}
+ const RN={g:'генератор',l:'лінія чи фаза',v:'лише показувати'};
+ for(const b of BL){if(!b.cfg)continue;nb++;const x=C[b.mac];
+  const st=b.seen&&b.alive?(on++,ok('на зв\'язку')+sm('вістка '+ago(b.ago)+' тому · '+b.rssi+' дБм'+(b.ver?' · версія '+esc(b.ver):''))):
+   b.seen?bad('мовчить')+sm('востаннє '+ago(b.ago)+' тому'):bad('не на зв\'язку')+sm('не озивався від запуску Сторожа');
+  h+='<tr><td><b>Маячок «'+esc(b.name||b.mac.slice(9))+'»</b>'+sm('прив\'язано · '+(RN[b.role]||esc(b.role)))+ad(b.mac,x)+'</td><td>'+st+'</td></tr>'}
+ if(bm){nb++;const x=C[bm],BS=['шукає BMS — її не чути','під\'єднується до BMS','BMS на зв\'язку','BMS не шле стану','пауза перед новою спробою під\'єднатись до BMS'];
+  const st=bat.bridge?(on++,ok('на зв\'язку')+sm((bat.ver?'версія '+esc(bat.ver)+' · ':'')+bat.rssi+' дБм · '+(bat.ok?'BMS «'+esc(bat.name||'')+'» на зв\'язку'+(bat.soc!=null?', '+bat.soc+' %':''):(BS[bat.st]||'BMS не на зв\'язку')))):
+   bad('не на зв\'язку')+sm('востаннє '+ago(bat.ago)+' тому');
+  h+='<tr><td><b>Міст батареї</b>'+sm('прив\'язується сам: шле Сторожу дані BMS')+ad(bm,x)+'</td><td>'+st+'</td></tr>'}
+ $('dvb').innerHTML=h;
+ $('dvcnt').textContent='· прив\'язано '+nb+', на зв\'язку '+on;
+ const bound=new Set([avr,bm].concat(BL.filter(b=>b.cfg).map(b=>b.mac))),BU={};
+ for(const b of BL)if(!b.cfg)BU[b.mac]=b;
+ const ms=[...new Set(cl.map(x=>x.mac).concat(Object.keys(BU)))].filter(m=>m&&!bound.has(m));
+ ms.sort((a,b)=>((C[b]&&C[b].assoc)?1:0)-((C[a]&&C[a].assoc)?1:0));
+ let o='',unk=0;
+ for(const m of ms){const x=C[m],b=BU[m];let what,act='';
+  if(b){what='<b>маячок</b>'+sm('шле Сторожу «я тут», але його немає в списку');act='<button data-act="bcnpick" data-mac="'+m+'">Додати маячок</button>'}
+  else if(isY(x))what='<b>цей пристрій</b>'+sm('з нього відкрито сторінку');
+  else if(isR(m))what='<b>телефон чи комп\'ютер</b>';
+  else{what='<b>невідомий</b>'+sm('може бути АВР');act='<button data-act="assign" data-mac="'+m+'">Це АВР</button>';if(x&&x.assoc)unk++}
+  const st=x&&x.assoc?ok('у мережі')+sm(sg(x)):b&&b.alive?ok('на зв\'язку')+sm('вістка '+ago(b.ago)+' тому'):gr('від\'єднався')+sm((x?ago(x.seen):b?ago(b.ago):'—')+' тому');
+  o+='<tr><td>'+what+ad(m,x)+(act?'<div style="margin-top:4px">'+act+'</div>':'')+'</td><td>'+st+'</td></tr>'}
+ $('cl').innerHTML=o||'<tr><td class="mut">Інших пристроїв у мережі Сторожа немає.</td></tr>';
+ const aY=w.avr.assigned&&isY(C[avr]);
+ $('clhint').textContent=aY?'АВР-ом зараз призначено пристрій, з якого відкрито цю сторінку. Справжній АВР з\'явиться окремим рядком, коли його підключать у застосунку eWeLink до точки «'+n.ap.ssid+'».':
+  !w.avr.assigned&&unk===1?'У мережі Сторожа один невідомий пристрій. Якщо АВР щойно підключали в eWeLink, це він: натисніть «Це АВР».':
+  (!w.avr.assigned&&!unk?'Підключіть АВР у застосунку eWeLink до точки «'+n.ap.ssid+'».':'');
+}
 function render(d){
  const w=d.watch,g=w.grid.st,l=w.line.st,le=w.line.enabled;
  $('obj').textContent='· '+w.obj;
@@ -329,23 +390,19 @@ function render(d){
  if(t.queue)ts+=', у черзі '+t.queue;
  row('Telegram',ts+(t.token&&t.recipients?' · одержувачів '+t.recipients:''));
  row('Годинник',esc(d.clock));
- row('Міст',esc(d.ver)+', працює '+ago(d.up)+', вільно '+Math.round(d.heap/1024)+' КБ');
+ row('Міст',esc(d.ver)+', працює '+ago(d.up)+', пам\'яті вільно '+Math.round(d.heap/1024)+' КБ'+(d.recentHeap!=null?' (найменше за 10 хв — '+Math.round(d.recentHeap/1024)+')':''));
  $('rows').innerHTML=r;
+ renderBat(d.bat);
  renderSch(d.sch);
- const avr=(w.avr.mac||'').toLowerCase(),bm={};for(const b of BL)bm[b.mac]=b;
- const you=d.you||'';
- let c='<tr class="mut"><td>Пристрій</td><td>Адреса</td><td>Сигнал</td><td>Ping</td><td></td></tr>',unk=0,aY=false;
- for(const x of d.net.clients){
-  const isA=x.mac===avr,isM=!!bm[x.mac],isY=!!(x.assoc&&x.ip&&x.ip===you),isR=(parseInt(x.mac.slice(0,2),16)&2)!==0;
-  if(isA&&isY)aY=true;
-  if(!isA&&!isM&&!isY&&!isR&&x.assoc)unk++;
-  const role=isA?(isY?'<b class="err">АВР?</b><br><span class="mut">це ваш пристрій</span>':isR?'<b class="err">АВР?</b><br><span class="mut">це телефон чи комп\'ютер</span>':'<b>АВР</b>'):isM?'<b>маячок</b>'+(bm[x.mac].name?'<br><span class="mut">'+esc(bm[x.mac].name)+'</span>':''):isY?'<span class="mut">це ваш пристрій</span>':isR?'<span class="mut">телефон чи комп\'ютер</span>':'<button data-act="assign" data-mac="'+x.mac+'">Це АВР</button>';
-  c+='<tr><td>'+x.mac+(x.assoc?'':'<br><span class="mut">від\'єднався '+ago(x.seen)+' тому</span>')+'</td><td>'+(x.ip||'—')+'</td><td>'+(x.assoc?x.rssi+' дБм':'—')+'</td><td>'+(x.ping==null?'—':ago(x.ping)+' тому')+'</td><td>'+role+'</td></tr>';
- }
- $('cl').innerHTML=d.net.clients.length?c:'<tr><td class="mut">До мережі для АВР ще ніхто не під\'єднувався.</td></tr>';
- $('clhint').textContent=aY?'АВР-ом зараз призначено пристрій, з якого відкрито цю сторінку. Справжній АВР з\'явиться окремим рядком, коли його підключать у застосунку eWeLink до точки «'+d.net.ap.ssid+'».':
-  !w.avr.assigned&&unk===1?'У мережі для АВР один невідомий пристрій. Якщо АВР щойно підключали в eWeLink, це він: натисніть «Це АВР».':
-  (!w.avr.assigned&&!unk?'Підключіть АВР у застосунку eWeLink до точки «'+d.net.ap.ssid+'».':'');
+ renderDev(d);                                   // 1.0.42: картка «Пристрої»
+ if(d.mem){const m=d.mem,k=x=>Math.round(x/1024),S=m.stk||{},N={loopTask:'основна',tg:'Telegram',snd:'звук',selfchk:'самоперевірка',ping:'ping'};
+  $('memline').innerHTML='<b>Пам\'ять</b>: вільно '+k(m.free)+' КБ, найбільший цілий шматок '+k(m.block)+' КБ, найменше від запуску '+k(m.min)+' КБ, за 10 хв — '+k(m.recent)+' КБ'+
+   ' · журнал: '+m.log.n+' рядків, '+k(m.log.used)+' з '+k(m.log.cap)+' КБ'+(m.log.iram?' у пам\'яті команд (звичайної не займає)':' у звичайній пам\'яті')+
+   ' · Wi-Fi: '+(m.wifi.tuned?'ощадний режим, буферів '+m.wifi.rx+' і '+m.wifi.tx:'звичайний режим, буферів '+m.wifi.rx+' і '+m.wifi.tx)+
+   ' · запас стека задач, Б: '+Object.keys(S).map(n=>(N[n]||n)+' '+S[n]).join(', ')+
+   (m.boot&&m.boot.length?' · на запуску, КБ: '+m.boot.map(b=>esc(b[0])+' '+k(b[1])).join(' → '):'')+
+   (d.drops?' · обірвано відповідей сторінки (клієнт не приймав): '+d.drops:'')+
+   (d.crash?' · <b>дамп останнього збою</b> у флеші: '+Math.max(1,k(d.crash))+' КБ — <a href="/api/crash.bin">завантажити</a> (для розбору розробником)':'')}
  if(d.log)$('lg').innerHTML=d.log.map(e=>'<tr><td class="mut" style="white-space:nowrap">'+esc(e.t)+'</td><td>'+esc(e.x)+'</td></tr>').join('');
  $('ver').textContent='Зараз: '+d.ver+', збірка '+d.build;
  let s='';
@@ -371,8 +428,38 @@ function schDay(x,now,title){if(!x||!x.have)return '<div class="sday"><b>'+title
  return '<div class="sday"><b>'+title+'</b> <span class="mut">'+esc(x.date)+'</span>'+(st===undefined?' <span class="mut">стан «'+esc(x.stRaw)+'»</span>':st?' <span class="err">'+st+'</span>':'')+
   '<div class="bar">'+bars+'</div><div class="ticks"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>'+
   (x.st===1?'<div class="mut">'+(txt.length?'Відключення: '+txt.join(', ')+' · без світла '+hrs(off*60):'Без відключень')+'</div>':'')+'</div>'}
+//  Батарея (1.0.36): дані JK BMS від мосту батареї (ESP32-C3 біля BMS)
+let batPend=false;
+function renderBat(b){const c=$('batcard');if(!b){c.classList.add('hide');return}c.classList.remove('hide');
+ const f=(x,d,k)=>(x/d).toFixed(k).replace('.',','),hm=m=>m>=60?Math.floor(m/60)+' год'+(m%60?' '+m%60+' хв':''):m+' хв',
+  ST=['міст шукає BMS — її не чути поруч','міст під\'єднується до BMS','на зв\'язку','міст під\'єднаний, але стану від BMS немає','міст чекає перед новою спробою під\'єднатись'];
+ let h='';
+ if(b.ok&&b.soc!=null){const i=b.i,ch=i<=-300?'розряд '+f(-i,1000,1)+' А':i>=300?'заряд '+f(i,1000,1)+' А':'спокій';
+  h+='<div class="big">'+b.soc+' %</div><div>'+f(b.v,1000,2)+' В · '+ch+' · '+Math.abs(Math.round(b.v*b.i/1e6))+' Вт'+(b.left>=0?' · вистачить ~'+hm(b.left)+' (до повного розряду)':'')+'</div>';
+  h+='<div class="mut">Залишок '+f(b.rem,1000,1)+' з '+f(b.full,1000,1)+' А·год · циклів '+b.cyc+' · стан '+b.soh+' %</div>';
+  h+='<div style="margin-top:6px">Комірки: '+b.n+', від '+f(b.lo,1000,3)+' В (№'+b.lox+') до '+f(b.hi,1000,3)+' В (№'+b.hix+'), різниця '+(b.hi-b.lo)+' мВ</div>';
+  if(b.cells&&b.cells.length)h+='<div class="cells">'+b.cells.map((v,k)=>'<span class="'+(k+1===b.lox?'lo':k+1===b.hix?'hi':'')+'">'+(k+1)+': '+f(v,1000,3)+'</span>').join('')+'</div>';
+  const T=[];if(b.t1!=null)T.push('датчик 1 — '+f(b.t1,10,1)+' °C');if(b.t2!=null)T.push('датчик 2 — '+f(b.t2,10,1)+' °C');if(b.tm!=null)T.push('ключі — '+f(b.tm,10,1)+' °C');
+  if(T.length)h+='<div style="margin-top:6px">Температура: '+T.join(', ')+'</div>';
+  h+='<div>Заряд '+(b.chg?'дозволено':'<b class="err">вимкнено BMS</b>')+' · розряд '+(b.dis?'дозволено':'<b class="err">вимкнено BMS</b>')+(b.bal?' · вирівнює комірки':'')+(b.heat?' · підігрів':'')+'</div>';
+  h+='<div>'+(b.alarm?'<b class="err">BMS повідомляє: '+esc(b.alarm)+'</b>':'Тривог BMS немає')+'</div>';
+ }else h+='<div><b class="err">'+(!b.seen?'Міст батареї від запуску Сторожа не озивався':!b.bridge?'Міст батареї не на зв\'язку '+ago(b.ago):(b.soc!=null?'Даних від BMS немає '+ago(b.age)+' — ':'Даних від BMS ще немає — ')+ST[b.st||0])+'</b></div>';
+ //  сторінка мосту через Сторожа працює з версії мосту 1.1.0 (старіша питає свої адреси не через /bms/)
+ const bv=(b.ver||'0').split('.').map(Number),bNew=bv[0]>1||(bv[0]===1&&bv[1]>=1);
+ if(b.seen&&b.bridge)h+=bNew?'<div style="margin-top:8px"><a href="/bms/" target="_blank" rel="noopener"><button type="button">Сторінка мосту батареї</button></a> <span class="mut">дисплей мосту, яку BMS слухати, оновлення мосту'+(b.lcd?' · дисплей увімкнено':'')+'</span></div>'
+  :'<div class="mut" style="margin-top:8px">Сторінка мосту (дисплей, оновлення по мережі) відкриватиметься звідси з версії мосту 1.1.0 — зараз '+esc(b.ver)+': її ставлять кабелем USB.</div>';
+ if(b.seen)h+='<div class="mut" style="margin-top:6px">Міст '+esc(b.mac)+', версія '+esc(b.ver)+(b.up?', працює '+ago(b.up):'')+', Wi-Fi '+b.rssi+' дБм'+(b.name?' · BMS '+esc(b.name)+(b.model&&b.model!==b.name?' ('+esc(b.model)+')':'')+(b.sw?', прошивка '+esc(b.sw):'')+', '+b.brssi+' дБм':'')+' · з\'єднань із BMS '+b.rc+'</div>';
+ $('batbody').innerHTML=h;$('batsub').textContent=b.ok?'дані '+ago(b.age)+' тому':'';
+ if(!batPend)$('bat_on').checked=!!b.on}
+$('bat_on').addEventListener('change',async e=>{batPend=true;const on=e.target.checked;
+ try{await j('/api/bms',{method:'POST',body:new URLSearchParams({on:on?'1':'0'})});$('batsub').textContent=on?'сповіщення ввімкнено':'сповіщення вимкнено'}
+ catch(err){e.target.checked=!on;$('batsub').textContent=err.message}batPend=false});
 function renderSch(s){if(!s)return;const set='<button data-act="gosch" style="margin-top:8px">Налаштувати</button>';
- if(!s.on){$('schq').textContent='';$('schline').innerHTML='<span class="mut">Не налаштовано. Виберіть свою чергу, і Сторож показуватиме графік YASNO тут і в боті, попереджатиме перед відключенням.</span><br>'+set;$('schdays').innerHTML='';$('schinfo').textContent='';$('schst').textContent='';return}
+ if(!s.on){$('schq').textContent=s.q?'· черга '+s.q+' · '+s.dsoName:'';
+  $('schline').innerHTML=s.q?'<span class="mut">Графік YASNO вимкнено: Сторож не звертається до YASNO — менше пам\'яті й навантаження. Попереджень перед відключенням і графіка в боті немає.</span><br><button class="p" data-act="schon" style="margin-top:8px">Увімкнути графік YASNO</button>'
+   :'<span class="mut">Не налаштовано. Виберіть свою чергу, і Сторож показуватиме графік YASNO тут і в боті, попереджатиме перед відключенням.</span><br>'+set;
+  $('schdays').innerHTML='';$('schinfo').textContent='';$('schst').textContent='';$('schbtn').innerHTML='';return}
+ if(!$('schbtn').firstChild)$('schbtn').innerHTML='<button data-act="schoff" style="margin-top:8px">Вимкнути графік YASNO</button> <span class="mut">менше пам\'яті й навантаження на Сторожа: без запитів до YASNO</span>';
  $('schq').textContent='· черга '+s.q+' · '+s.dsoName;
  $('schline').innerHTML=s.have?esc(s.line):'<span class="err">Даних з YASNO поки немає'+(s.err?': '+esc(s.err):'')+'</span>';
  $('schdays').innerHTML=s.have&&s.days?schDay(s.days[0],s.now,'Сьогодні')+schDay(s.days[1],null,'Завтра'):'';
@@ -408,6 +495,7 @@ $('a_to').addEventListener('change',()=>$('a_who').classList.toggle('hide',$('a_
 async function loadSet(){
  try{const s=await j('/api/settings');curSet=s;
   for(const k of ['obj','staSsid','staBssid','apSsid','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin'])$('f_'+k).value=s[k];
+  $('f_mdnsOn').checked=!!s.mdnsOn;
   $('f_notifyStart').checked=s.notifyStart;bcnReload();
   $('f_schOn').checked=!!s.schOn;$('f_schTom').checked=!!s.schTom;$('f_schDso').value=s.schDso||'3/301';$('f_schQueue').value=s.schQueue||'';$('f_schWarn').value=s.schWarn;
   $('h_staPass').textContent=s.staPassSet?'(задано)':'(не задано)';
@@ -422,8 +510,8 @@ function botStatus(){const t=lastTg||{},set=!!(t.token||tokSet);
  $('noBot').classList.toggle('hide',set);
  $('boterr').textContent=set&&!t.bot&&t.lastErr?'Telegram відповів: '+t.lastErr+'. Перевірте токен.':''}
 //  Що отримує одержувач (1.0.21): біти — як RF_* у прошивці
-const FLB=[[0,'Сповіщення'],[1,'Світло'],[2,'Генератор'],[3,'Графік'],[4,'Підсумок'],[5,'Службові'],[6,'Маячки'],[7,'🌙 уночі тихо'],[8,'👑 адмін']];
-function chips(x){const on=x.fl&1;return '<div class="chips">'+FLB.map(([b,n])=>{const c=(x.fl>>b)&1,dim=b>=1&&b<=6&&!on;return '<label class="'+(dim?'dim':'')+'"><input type="checkbox" data-fl="'+b+'" data-id="'+esc(x.id)+'" data-v="'+x.fl+'"'+(c?' checked':'')+'>'+n+'</label>'}).join('')+'</div>'}
+const FLB=[[0,'Сповіщення'],[1,'Світло'],[2,'Генератор'],[3,'Графік'],[4,'Підсумок'],[5,'Службові'],[6,'Маячки'],[9,'🔋 Батарея'],[7,'🌙 уночі тихо'],[8,'👑 адмін']];
+function chips(x){const on=x.fl&1;return '<div class="chips">'+FLB.map(([b,n])=>{const c=(x.fl>>b)&1,dim=(b>=1&&b<=6||b===9)&&!on;return '<label class="'+(dim?'dim':'')+'"><input type="checkbox" data-fl="'+b+'" data-id="'+esc(x.id)+'" data-v="'+x.fl+'"'+(c?' checked':'')+'>'+n+'</label>'}).join('')+'</div>'}
 document.addEventListener('change',async e=>{const c=e.target.closest('input[data-fl]');if(!c)return;const b=+c.dataset.fl,v=+c.dataset.v,nv=c.checked?(v|(1<<b)):(v&~(1<<b));
  try{await j('/api/chatflags',{method:'POST',body:new URLSearchParams({id:c.dataset.id,fl:String(nv)})});note('rmsg','Збережено.');loadTg()}catch(err){note('rmsg',err.message,1);loadTg()}});
 async function loadTg(){
@@ -440,6 +528,7 @@ async function loadTg(){
 async function save(){
  const p=new URLSearchParams();
  for(const k of ['obj','staSsid','staBssid','staPass','apSsid','apPass','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin','adminPass'])p.append(k,$('f_'+k).value);
+ p.append('mdnsOn',$('f_mdnsOn').checked?'1':'0');
  p.append('notifyStart',$('f_notifyStart').checked?'1':'0');p.append('pwBtn',$('f_pwBtn').value);
  p.append('schOn',$('f_schOn').checked?'1':'0');p.append('schTom',$('f_schTom').checked?'1':'0');p.append('schDso',$('f_schDso').value);p.append('schQueue',$('f_schQueue').value);p.append('schWarn',$('f_schWarn').value);
  try{const r=await j('/api/settings',{method:'POST',body:p});
@@ -579,6 +668,8 @@ document.addEventListener('click',async e=>{
  else if(a==='bcndel'){if(!confirm('Прибрати маячок '+b.dataset.mac+' зі списку? Повідомлень про нього більше не буде.'))return;try{await j('/api/beacon',{method:'POST',body:new URLSearchParams({mac:b.dataset.mac,act:'del'})});note('bcnmsg','Прибрано зі списку.');bcnReload()}catch(err){note('bcnmsg',err.message,1)}}
  else if(a==='bcnadd'){const m=$('b_mac').value.trim().toLowerCase();if(!/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(m)){note('bcnmsg','MAC-адреса — у вигляді aa:bb:cc:dd:ee:ff',1);return}
   if(await bcnPost(m,$('b_role').value,$('b_name').value.trim(),'Маячок додано до списку.')){$('b_mac').value='';$('b_name').value=''}}
+ else if(a==='schoff'||a==='schon'){const on=a==='schon';if(!on&&!confirm('Вимкнути графік YASNO? Сторож перестане брати графік, попереджати перед відключенням і показувати графік у боті.'))return;
+  b.disabled=true;try{await j('/api/sch',{method:'POST',body:new URLSearchParams({on:on?'1':'0'})});$('f_schOn').checked=on;$('schbtn').innerHTML='';await refresh()}catch(err){$('schinfo').textContent=err.message}b.disabled=false}
  else if(a==='gosch'){document.querySelector('nav button[data-t="set"]').click();setTimeout(()=>$('schset').scrollIntoView({behavior:'smooth'}),300)}
  else if(a==='schfetch'){try{await j('/api/schfetch',{method:'POST'});$('schst').textContent='Запитую в YASNO…';setTimeout(refresh,4000)}catch(err){$('schst').textContent=err.message}}
  else if(a==='rprefs'){if(!confirm('Повернути типові налаштування? Назва об\'єкта, затримки, підсумок, сигнали й кнопка пароля стануть типовими. Wi-Fi, АВР, маячки, бот і пароль лишаться.'))return;
@@ -597,9 +688,14 @@ document.addEventListener('click',async e=>{
  else if(a==='savesum'){const h=parseInt($('f_sumHour').value,10);if(!(h>=0&&h<=23)){note('summsg','Година — від 0 до 23',1);return}try{await j('/api/settings',{method:'POST',body:new URLSearchParams({sumOn:$('f_sumOn').checked?'1':'0',sumHour:String(h)})});note('summsg','Збережено.')}catch(err){note('summsg',err.message,1)}}
  else if(a==='savetok'){const v=$('f_tgToken').value.trim();if(!v){note('tmsg','Вставте токен від @BotFather',1);return}try{await j('/api/settings',{method:'POST',body:new URLSearchParams({tgToken:v})});note('tmsg','Токен збережено.');loadTg();refresh()}catch(err){note('tmsg',err.message,1)}}
  else if(a==='reboot'){if(!confirm('Перезапустити Сторожа? АВР на кілька секунд втратить Wi-Fi.'))return;try{await j('/api/reboot',{method:'POST'})}catch(err){}note('smsg','Перезапуск…')}
+ else if(a==='bcnpick'){const m=b.dataset.mac,nb=document.querySelector('nav button[data-t="set"]');if(nb)nb.click();
+  setTimeout(()=>{$('b_mac').value=m;$('bcncard').scrollIntoView({behavior:'smooth'});$('b_name').focus()},300)}
  else if(a==='assign'){if(!confirm('Вважати пристрій '+b.dataset.mac+' АВР-ом?'))return;try{await j('/api/assign',{method:'POST',body:new URLSearchParams({mac:b.dataset.mac})});refresh();if(tab==='set')loadSet()}catch(err){alert(err.message)}}
  else if(a==='logout'){try{await j('/logout',{method:'POST'})}catch(err){}location.reload()}
  else if(a==='add'){try{await j('/api/addchat',{method:'POST',body:new URLSearchParams({id:b.dataset.id,name:b.dataset.name})});note('rmsg','Додано.');loadTg();refresh()}catch(err){note('rmsg',err.message,1)}}
 });
-refresh();setInterval(()=>{if(tab==='set')bcnReload(false);else if(tab!=='upd'&&tab!=='ins')refresh()},3000);
+//  1.0.39: поки вкладка браузера схована — стан не питаємо (забута вкладка годинами навантажувала Сторожа кожні 3 с);
+//  відкрили знову — одразу оновлюємо
+refresh();setInterval(()=>{if(document.hidden)return;if(tab==='set')bcnReload(false);else if(tab!=='upd'&&tab!=='ins')refresh()},3000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&tab!=='upd'&&tab!=='ins'&&tab!=='set')refresh()});
 </script></body></html>)PAGE";

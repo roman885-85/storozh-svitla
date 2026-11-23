@@ -6,6 +6,8 @@
 #include "stats.h"
 #include "certs.h"
 #include "yasno.h"
+#include "bms.h"
+#include "mem.h"
 #include "version.h"
 #include "lcd.h"
 #include <NetworkClientSecure.h>
@@ -283,16 +285,17 @@ static int call(const String& token, const char* method, const String& body, Str
   if (hc->begin(*cli, String("https://api.telegram.org/bot") + token + "/" + method)) {
     //  1.0.33: нове з'єднання — лише коли пам'яті досить. 22.11.2026 о 10:44: «X509 — Certificate verification failed»,
     //  хоча сертифікат Telegram правильний: перевірці підпису забракло пам'яті, поки сторінка й Wi-Fi тимчасово її забрали.
-    //  Чекаємо до 8 с, поки вільно ≥ 36 КБ і найбільший шматок ≥ 12 КБ.
+    //  Чекаємо до 8 с, поки вільно ≥ 16 КБ і найбільший шматок ≥ 4 КБ. 1.0.38: це справжні цифри (mem.h); старі
+    //  «36 і 12 КБ» рахувались разом із ~32 КБ пам'яті команд, тобто насправді вимагали лише ~4 КБ.
     if (!hc->connected()) {
       int64_t t0 = nowUs();
-      while ((ESP.getFreeHeap() < 36000 || ESP.getMaxAllocHeap() < 12000) && nowUs() - t0 < 8000000LL) {
+      while ((memFree() < 16000 || memBlock() < 4000) && nowUs() - t0 < 8000000LL) {
         hbUs = nowUs();
         vTaskDelay(pdMS_TO_TICKS(250));
       }
       int64_t w = (nowUs() - t0) / 1000000;
-      if (w >= 2) logEvent("Telegram: чекав пам'ять для з'єднання " + String((long)w) + " с (вільно " + String(ESP.getFreeHeap() / 1024) +
-                           " КБ, найбільший шматок " + String(ESP.getMaxAllocHeap() / 1024) + " КБ)");
+      if (w >= 2) logEvent("Telegram: чекав пам'ять для з'єднання " + String((long)w) + " с (вільно " + String(memFree() / 1024) +
+                           " КБ, найбільший шматок " + String(memBlock() / 1024) + " КБ)");
     }
     hc->addHeader("Content-Type", "application/json");
     code = hc->POST(body);
@@ -308,8 +311,8 @@ static int call(const String& token, const char* method, const String& body, Str
                                                                  : String("з'єднання не відкрилось (адреса чи TCP, без помилки TLS)"))
                  : code == HTTPC_ERROR_READ_TIMEOUT ? String("відповіді немає за ") + String(readMs / 1000) + " с"
                  : code == HTTPC_ERROR_TOO_LESS_RAM ? String("бракує пам'яті") : String("код ") + String(code);
-      logEvent("Telegram (" + String(method) + "): " + why + " · пам'ять: вільно " + String(ESP.getFreeHeap() / 1024) +
-               " КБ, найбільший шматок " + String(ESP.getMaxAllocHeap() / 1024) + " КБ, запас TLS зайнято " + String(tlsPoolBusy()) + "/2");
+      logEvent("Telegram (" + String(method) + "): " + why + " · пам'ять: вільно " + String(memFree() / 1024) +
+               " КБ, найбільший шматок " + String(memBlock() / 1024) + " КБ, запас TLS зайнято " + String(tlsPoolBusy()) + "/2");
     }
     dropConn();                                       // зіпсоване з'єднання вдруге не беремо
   }
@@ -520,7 +523,7 @@ static int adminCount() { int n = 0; for (int i = 0; i < nrec; i++) if (rec[i].f
 static bool saveRec(const Chat* c, int n) { S.tgChats = chatsToText(c, n); bool ok = settingsSaveChats(); tgReload(); return ok; }
 static String who(const Chat& c) { return c.name.length() ? c.name : String(c.id); }
 static String btn(const String& text, const String& data) { return "{\"text\":\"" + jsonEsc(text) + "\",\"callback_data\":\"" + jsonEsc(data) + "\"}"; }
-static const char* const BIT_NAME[] = {"усі сповіщення", "світло", "генератор", "графік", "підсумок", "службові", "маячки", "уночі без звуку", "адміністратор"};
+static const char* const BIT_NAME[] = {"усі сповіщення", "світло", "генератор", "графік", "підсумок", "службові", "маячки", "уночі без звуку", "адміністратор", "батарея"};
 
 //  adm — вигляд для адміністратора (інший користувач): ще «👑» і «🗑». У даних кнопки: n — свій вигляд, N — адміністратора.
 static String notifyText(int i, bool adm) {
@@ -529,7 +532,7 @@ static String notifyText(int i, bool adm) {
   if (!(c.fl & RF_ON)) t += "\n🔕 Зараз сповіщення вимкнено зовсім. Кнопки «📊 Стан», «🗓 Графік», «📈 Статистика» працюють.";
   else t += "\nНатисніть, щоб увімкнути ✅ чи вимкнути ⬜:\n· світло — зникло й повернулось міське світло\n· генератор — запустився, зупинився, «вимкніть»\n"
             "· графік — попередження перед відключенням і графік на завтра\n· підсумок — щодня, скільки світло було\n· службові — Сторож перезапустився, пароль\n"
-            "· маячки — напруга на лініях і фазах";
+            "· маячки — напруга на лініях і фазах\n· батарея — заряд, на скільки вистачить, тривоги BMS (адміністраторам — завжди)";
   if (c.fl & RF_NIGHT) t += "\n🌙 З " + String(S.tgNightFrom) + ":00 до " + String(S.tgNightTo) + ":00 — без звуку.";
   if (adm) t += "\n\n" + String(c.id < 0 ? "Група" : "Людина") + " · " + String(c.id) + (c.fl & RF_ADMIN ? " · 👑 адміністратор" : "");
   return t;
@@ -542,6 +545,7 @@ static String notifyMk(int i, bool adm) {
   m += "[" + b(1, "Світло") + "," + b(2, "Генератор") + "],";
   m += "[" + b(3, "Графік") + "," + b(4, "Підсумок") + "],";
   m += "[" + b(5, "Службові") + "," + b(6, "Маячки") + "],";
+  m += "[" + b(9, "🔋 Батарея") + "],";
   m += "[" + btn(c.fl & RF_NIGHT ? "🌙 Уночі без звуку: так" : "🌙 Уночі без звуку: ні", p + "7") + "],";
   m += "[" + btn(c.fl & RF_ON ? "🔕 Вимкнути всі сповіщення" : "🔔 Увімкнути сповіщення", p + "0") + "]";
   if (adm) {
@@ -555,9 +559,9 @@ static String usersText() {
   for (int i = 0; i < nrec; i++) {
     const Chat& c = rec[i];
     int cats = 0;
-    for (int b = 1; b <= 6; b++) if (c.fl >> b & 1) cats++;
+    for (int b = 1; b <= 9; b++) if (b <= 6 || b == 9) cats += c.fl >> b & 1;
     t += "\n" + String(i + 1) + ". " + htmlEsc(who(c)) + (c.id < 0 ? " (група)" : "") + " — " +
-         (!(c.fl & RF_ON) ? String("🔕 вимкнено") : cats == 6 ? String("🔔 усе") : String("🔔 " + String(cats) + " з 6")) +
+         (!(c.fl & RF_ON) ? String("🔕 вимкнено") : cats == 7 ? String("🔔 усе") : String("🔔 " + String(cats) + " з 7")) +
          (c.fl & RF_NIGHT ? " · 🌙" : "") + (c.fl & RF_ADMIN ? " · 👑" : "");
   }
   if (!nrec) t += "\nПоки нікого немає.";
@@ -647,13 +651,14 @@ static String diagText() {
   int64_t now = nowUs();
   String r = "🛠 <b>Сторож світла</b>\n⛪ " + htmlEsc(S.objName) + " · " + fmtHM(now) +
              "\nПрошивка " FW_VERSION ", працює " + fmtDur(now / 1000000) + "\nОстанній запуск: " + htmlEsc(resetReasonText()) +
-             "\nПам'ять: вільно " + String(ESP.getFreeHeap() / 1024) + " КБ, найменше було " + String(ESP.getMinFreeHeap() / 1024) + " КБ" +
+             "\nПам'ять: вільно " + String(memFree() / 1024) + " КБ, найменше було " + String(memMin() / 1024) + " КБ" +
              "\n📶 Wi-Fi: " + (staUp() ? htmlEsc(S.staSsid) + ", " + String(staRssi()) + " дБм" : String("роутер не відповідає"));
   int ar;
   if (!watchAvrSet()) r += "\n🔌 АВР: не призначено";
   else if (watchAvrRssi(ar)) r += "\n🔌 АВР: у мережі, " + String(ar) + " дБм";
   else r += "\n🔌 АВР: немає в мережі";
   r += "\n📡 Маячки:" + watchBeaconsText();
+  r += bmsDiagLine();                            // 1.0.36
   r += schDiagLine();
   xSemaphoreTake(qm, portMAX_DELAY);
   r += "\n✉️ Telegram: надіслано " + String(sentCount) + (dropped ? ", втрачено " + String(dropped) : String()) + (q.size() ? ", у черзі " + String((int)q.size()) : String());
@@ -780,7 +785,7 @@ static void onButton(const In& m) {
     int bit = c2 > 0 ? d.substring(c2 + 1).toInt() : -1;
     if (i < 0) return answerCb(m.cb, "Цього чату вже немає серед одержувачів");
     bool self = viewer == id && id > 0;                   // у групі змінює лише адміністратор
-    if (bit < 0 || bit > 8 || (!self && !adm) || (bit == 8 && !adm)) return answerCb(m.cb, "Змінити може лише адміністратор");
+    if (bit < 0 || bit > 9 || (!self && !adm) || (bit == 8 && !adm)) return answerCb(m.cb, "Змінити може лише адміністратор");
     if (bit == 8 && (rec[i].fl & RF_ADMIN) && adminCount() <= 1) return answerCb(m.cb, "Це єдиний адміністратор — спершу призначте іншого");
     Chat c[MAXR];
     int n = nrec;
@@ -1130,7 +1135,8 @@ void tgBegin() {
   //  1.0.20: відмінок («1 повідомлень» у 1.0.19)
   if (n) logEvent("Telegram: черга пережила перезапуск — " + String(n) + (n % 10 == 1 && n % 100 != 11 ? " повідомлення чекає" :
                   n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? " повідомлення чекають" : " повідомлень чекають") + " на надсилання");
-  xTaskCreatePinnedToCore(task, "tg", 12288, nullptr, 1, nullptr, ARDUINO_RUNNING_CORE);
+  //  1.0.39: стек 10 КБ (було 12): за 4,5 год роботи 1.0.38 з десятками рукостискань TLS зайнято щонайбільше 6,1 КБ
+  xTaskCreatePinnedToCore(task, "tg", 10240, nullptr, 1, nullptr, ARDUINO_RUNNING_CORE);
 }
 
 int tgHealth() {

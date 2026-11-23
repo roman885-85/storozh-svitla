@@ -1,16 +1,44 @@
 #include "util.h"
 #include "box.h"
+#include "logring.h"
 #include <esp_system.h>
+#include <esp_heap_caps.h>
 #include <sys/time.h>
 
-struct Ev { int64_t us; String text; };
-static const int LOGN = 80;
-static Ev evs[LOGN];
-static int evHead = 0, evCount = 0;
+//  Журнал (1.0.38) — кільце в пам'яті команд (IRAM), а не 80 рядків String у звичайній: див. logring.h.
+//  Беремо шматок лише якщо він справді в IRAM (0x40080000–0x400A0000); дали звичайну пам'ять — повертаємо й пробуємо
+//  менший, а зовсім без IRAM — малий журнал у звичайній пам'яті.
+static LogRing ring;
+static bool ringIram = false;
+static const int LOGSHOW = 250;                  // більше рядків за раз не віддаємо
 static SemaphoreHandle_t logMtx = nullptr;
+static void ringBegin() {
+  //  1.0.39: з кроком 512 Б — скільки справді є (у 1.0.38 30 720 не вмістилось, і 6 КБ пам'яті команд лишались порожні)
+  for (uint32_t sz = 31232; sz >= 8192; sz -= 512) {
+    void* p = heap_caps_malloc(sz, MALLOC_CAP_32BIT);
+    if (!p) continue;
+    uintptr_t a = (uintptr_t)p;
+    if (a >= 0x40080000UL && a + sz <= 0x400A0000UL) { ring.begin((uint32_t*)p, sz); ringIram = true; return; }
+    heap_caps_free(p);
+  }
+  void* p = heap_caps_malloc(6144, MALLOC_CAP_32BIT);
+  if (p) ring.begin((uint32_t*)p, 6144);
+}
+String logMemJson() {
+  return String("{\"iram\":") + (ringIram ? "true" : "false") + ",\"cap\":" + String(ring.capacity()) + ",\"used\":" + String(ring.usedBytes()) +
+         ",\"n\":" + String(ring.size()) + "}";
+}
+//  Один запис (i-й від найновішого) у звичайну пам'ять читача: текст — не довше 300 Б (так і записано) + запас
+static bool logGet(int i, int64_t& us, String& text) {
+  char buf[340];
+  if (i < 0 || i >= LOGSHOW || ring.get((uint32_t)i, us, buf, sizeof buf) < 0) return false;
+  text = buf;
+  return true;
+}
 
 void utilBegin() {
   logMtx = xSemaphoreCreateMutex();
+  ringBegin();
   setenv("TZ", TZ_KYIV, 1);
   tzset();
   boxBegin();                                    // 1.0.29: що лишив попередній запуск у RTC-пам'яті
@@ -106,9 +134,10 @@ String resetReasonText() {
     case ESP_RST_POWERON:  return "увімкнення живлення (Сторож був без живлення)";
     case ESP_RST_SW:       return "програмний перезапуск без записаної причини";
     case ESP_RST_PANIC:    return "збій програми";
-    case ESP_RST_INT_WDT:
-    case ESP_RST_TASK_WDT:
-    case ESP_RST_WDT:      return "спрацював сторож — програма зависла";
+    //  1.0.41: який саме сторож — щоб із журналу було видно, що шукати (до того — один текст на всі три)
+    case ESP_RST_TASK_WDT: return "спрацював сторож задач — програма зависла";
+    case ESP_RST_INT_WDT:  return "спрацював сторож переривань — програма зависла";
+    case ESP_RST_WDT:      return "спрацював апаратний сторож — програма зависла";
     case ESP_RST_BROWNOUT: return "просідання живлення";
     case ESP_RST_EXT:      return "кнопка скидання";
     default:               return "інша причина";
@@ -131,10 +160,7 @@ void logEventLocal(const String& text) {
   if (!logMtx) return;
   String c = capped(text);
   xSemaphoreTake(logMtx, portMAX_DELAY);
-  evs[evHead].us = nowUs();
-  evs[evHead].text = c;
-  evHead = (evHead + 1) % LOGN;
-  if (evCount < LOGN) evCount++;
+  ring.put(nowUs(), c.c_str(), c.length());
   xSemaphoreGive(logMtx);
 }
 
@@ -142,46 +168,43 @@ void logEventLocal(const String& text) {
 String logEntryJson(int i) {
   if (!logMtx) return String();
   int64_t now = nowUs();
+  int64_t us = 0;
+  String x;
   xSemaphoreTake(logMtx, portMAX_DELAY);
-  if (i < 0 || i >= evCount) { xSemaphoreGive(logMtx); return String(); }
-  int idx = (evHead - 1 - i + LOGN) % LOGN;
-  int64_t us = evs[idx].us;
-  String x = evs[idx].text;
+  bool ok = logGet(i, us, x);
   xSemaphoreGive(logMtx);
+  if (!ok) return String();
   return "{\"t\":\"" + jsonEsc(fmtClock(us)) + "\",\"ago\":" + String((long)((now - us) / 1000000)) + ",\"x\":\"" + jsonEsc(x) + "\"}";
 }
 
 String logJson(int maxN) {
   String o = "[";
   if (!logMtx) return "[]";
-  xSemaphoreTake(logMtx, portMAX_DELAY);
-  int n = maxN < evCount ? maxN : evCount;
-  int64_t now = nowUs();
-  for (int i = 0; i < n; i++) {
-    int idx = (evHead - 1 - i + LOGN) % LOGN;
+  for (int i = 0; i < maxN; i++) {
+    String e = logEntryJson(i);
+    if (!e.length()) break;
     if (i) o += ',';
-    o += "{\"t\":\"" + jsonEsc(fmtClock(evs[idx].us)) + "\",\"ago\":" + String((long)((now - evs[idx].us) / 1000000)) +
-         ",\"x\":\"" + jsonEsc(evs[idx].text) + "\"}";
+    o += e;
   }
-  xSemaphoreGive(logMtx);
   return o + "]";
 }
 
 String logText(int maxN, size_t maxLen) {
   String o;
   if (!logMtx) return o;
-  xSemaphoreTake(logMtx, portMAX_DELAY);
-  int n = maxN < evCount ? maxN : evCount;
-  for (int i = 0; i < n; i++) {
-    int idx = (evHead - 1 - i + LOGN) % LOGN;
-    String t = evs[idx].text;
+  for (int i = 0; i < maxN; i++) {
+    int64_t us = 0;
+    String t;
+    xSemaphoreTake(logMtx, portMAX_DELAY);
+    bool ok = logGet(i, us, t);
+    xSemaphoreGive(logMtx);
+    if (!ok) break;
     int nl = t.indexOf('\n');
     if (nl > 0) t = t.substring(0, nl) + " …";          // повідомлення Telegram у журналі — лише перший рядок
-    String line = "\n<code>" + fmtHM(evs[idx].us) + "</code> " + htmlEsc(t.substring(0, 160));
+    String line = "\n<code>" + fmtHM(us) + "</code> " + htmlEsc(t.substring(0, 160));
     if (o.length() + line.length() > maxLen) break;
     o += line;
   }
-  xSemaphoreGive(logMtx);
   return o;
 }
 

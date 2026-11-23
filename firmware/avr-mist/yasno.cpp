@@ -7,10 +7,13 @@
 #include "util.h"
 #include "certs.h"
 #include "lcd.h"
+#include "mem.h"
 #include <NetworkClientSecure.h>
 #include <HTTPClient.h>
 #include <esp_heap_caps.h>
 #include <esp_rom_crc.h>
+#include <memory>
+#include <new>
 
 static SemaphoreHandle_t sm = nullptr;
 static YQueue cur;                      // останній вдалий графік своєї черги (під sm)
@@ -59,8 +62,10 @@ void schNetStep() {
   if (!S.schOn || !S.schQueue.length() || !staUp()) return;
   int64_t now = nowUs();
   if (!kick && now < nextUs) return;
-  //  Шифроване з'єднання бере ~50 КБ; Telegram у цій самій задачі — тож разом вони не бувають.
-  if (ESP.getMaxAllocHeap() < 24000 || ESP.getFreeHeap() < 64000) {
+  //  Telegram у цій самій задачі — разом два шифровані з'єднання не бувають; буфери шифрування — із запасу TLS.
+  //  1.0.38: поріг — за справжніми цифрами (mem.h). Старий («вільно ≥ 64 КБ» разом з ~32 КБ пам'яті команд) лишився
+  //  з часів до запасу TLS і після 1.0.32 пропускав запит майже лише одразу після запуску: графік годинами не оновлювався.
+  if (memFree() < 16000 || memBlock() < 4000) {
     nextUs = now + 60LL * 1000000;
     xSemaphoreTake(sm, portMAX_DELAY);
     lastErr = "мало пам'яті для запиту, спробую за хвилину";
@@ -72,7 +77,19 @@ void schNetStep() {
   tryUs = now;
   String k = key();
   String url = "https://app.yasno.ua/api/blackout-service/public/shutdowns/regions/" + String(S.schRegion) + "/dsos/" + String(S.schDso) + "/planned-outages";
-  static YasnoStream ys;                 // буфер 2 КБ — не на стеку задачі
+  //  1.0.37 (власник: «функцию отключения для ясно, для экономии памяти и повышения стабильности»): буфер розбору
+  //  (2,1 КБ) і графік (0,5 КБ) — у купі лише на час запиту, а не постійно; вимкнений YASNO їх не тримає зовсім.
+  std::unique_ptr<YasnoStream> ysp(new (std::nothrow) YasnoStream);
+  std::unique_ptr<YQueue> yp(new (std::nothrow) YQueue);
+  if (!ysp || !yp) {
+    nextUs = now + 60LL * 1000000;
+    xSemaphoreTake(sm, portMAX_DELAY);
+    lastErr = "мало пам'яті для запиту, спробую за хвилину";
+    errUs = now;
+    xSemaphoreGive(sm);
+    return;
+  }
+  YasnoStream& ys = *ysp;
   ys.begin(S.schQueue.c_str());
   YSink sink(ys);
   int code = -100, wr = 0;
@@ -93,11 +110,11 @@ void schNetStep() {
       h.end();
     }
   }                                      // з'єднання закрито й пам'ять звільнено до будь-чого іншого
-  uint32_t low = mon ? heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) : 0;
+  uint32_t low = mon ? heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) : 0;   // 1.0.38: без пам'яті команд
   if (mon) heap_caps_monitor_local_minimum_free_size_stop();
   lastLow = low;
   lastMs = (uint32_t)((nowUs() - t0) / 1000);
-  static YQueue y;
+  YQueue& y = *yp;
   bool ok = code == 200 && wr > 0 && ys.finish(y);
   String err;
   if (!ok) {

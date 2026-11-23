@@ -7,3 +7,5 @@ __pycache__/
 backup/
 venv/
 release/
+tests/devices/out/*.html
+tests/devices/out/

@@ -22,6 +22,10 @@ constexpr int MAXC = 8;
 void    bridgeBegin();
 void    bridgeLoop();
 bool    staUp();
+void    bridgeKick(const uint8_t mac[6], int sec);   // 1.0.39: тримати пристрій поза точкою sec секунд (0 — припинити)
+int     bridgeKickLeft();       // скільки секунд ще триває
+void    bridgeMdns();           // 1.0.38: назва avr-mist.local — увімкнути чи вимкнути за S.mdnsOn
+bool    bridgeNetOk();          // 1.0.38: точка запустилась і роутер (якщо задано) під'єднувався — для перевірки нової прошивки
 int     clientsSnapshot(ApDev* out, int maxN);
 bool    findClient(const uint8_t mac[6], ApDev& out);
 int     apChannel();

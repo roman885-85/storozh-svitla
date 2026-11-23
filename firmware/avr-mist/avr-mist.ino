@@ -30,6 +30,10 @@
 #include "version.h"
 #include "box.h"
 #include "tlspool.h"
+#include "bms.h"
+#include "mem.h"
+#include "crash.h"
+#include "wifituning.h"
 
 static const int RESET_BTN = 0;          // кнопка BOOT: 10 с — скинути налаштування
 static String cmdLine;
@@ -166,13 +170,16 @@ static void selfGuard() {
   static uint32_t seen = 0;
   static int fails = 0;
   if (otaPending) {
-    if (selfRes == 1) {
+    //  1.0.38: справною — лише коли й Wi-Fi справді працює (точка запустилась, роутер під'єднувався). Сторінку
+    //  самоперевірка відкриває через 127.0.0.1 — це вдається й без Wi-Fi, тож прошивка з поламаним Wi-Fi лишалась би назавжди.
+    if (selfRes == 1 && bridgeNetOk()) {
       esp_ota_mark_app_valid_cancel_rollback();
       otaPending = false;
-      logEvent("Нову прошивку " FW_VERSION " визнано справною: сторінка відповідає");
+      logEvent("Нову прошивку " FW_VERSION " визнано справною: сторінка відповідає, Wi-Fi працює");
     } else if (millis() > 180000) {
-      logEvent("Нова прошивка " FW_VERSION ": сторінка не відповіла за 3 хв — відкат на попередню версію");
-      boxMark("нова прошивка " FW_VERSION " не відповіла за 3 хв — відкат", false);
+      const char* why = selfRes == 1 ? "Wi-Fi не запрацював за 3 хв" : "сторінка не відповіла за 3 хв";
+      logEvent(String("Нова прошивка " FW_VERSION ": ") + why + " — відкат на попередню версію");
+      boxMark(String("нова прошивка " FW_VERSION ": ") + why + " — відкат", false);
       delay(300);
       esp_ota_mark_app_invalid_rollback_and_reboot();
       otaPending = false;                  // повернулось — відкочуватись нікуди (прошивка кабелем): працюємо далі, без повторів
@@ -201,30 +208,41 @@ static void guards() {
   int64_t now = nowUs();
   if (S.tgToken.length() && staUp() && tgHeartbeatUs() && now - tgHeartbeatUs() > 600LL * 1000000)
     restartWith("задача Telegram зависла — 10 хв без жодного кроку", false);
-  //  Пам'ять тече — перезапуск, поки не впало саме.
-  if (ESP.getFreeHeap() < 20000) {
+  //  Пам'ять тече — перезапуск, поки не впало саме. 1.0.38: за справжніми цифрами (mem.h): старий поріг «< 20 КБ»
+  //  рахувався разом з ~32 КБ пам'яті команд і не міг спрацювати ніколи. Тепер: менше 6 КБ три хвилини поспіль —
+  //  з такою пам'яттю ні Telegram, ні сторінка вже не працюють.
+  if (memFree() < 6000) {
     if (!lowSince) lowSince = now;
-    else if (now - lowSince > 60LL * 1000000) restartWith("мало пам'яті понад хвилину: вільно " + String(ESP.getFreeHeap()) + " Б", false);
+    else if (now - lowSince > 180LL * 1000000) restartWith("мало пам'яті понад 3 хв: вільно " + String(memFree()) + " Б", false);
   } else lowSince = 0;
 }
 
 void setup() {
   Serial.begin(115200);
   pinMode(RESET_BTN, INPUT_PULLUP);
+  memStage("старт");
   utilBegin();
   tlsPoolBegin();                        // 1.0.32: запас пам'яті для TLS — до першого з'єднання
   settingsLoad();
   statsBegin();
+  memStage("налаштування");
   sigBegin();
   lcdBegin();
+  memStage("сигнали");
   logEvent(String("Запуск «Сторожа світла» ") + FW_VERSION + " (" + resetReasonText() + ")");
   boxReport();                           // 1.0.29: перезапуск був несподіваний — чому й що було перед тим
+  crashBoot();                           // 1.0.41: після збою чи сторожа — підсумок дампу з флешу (де стояла програма)
   bridgeBegin();
+  memStage("Wi-Fi");
   watchBegin();
   schBegin();                            // до tgBegin: задача Telegram одразу питає графік
   tgBegin();
+  memStage("Telegram");
   webBegin();
   otaBegin();
+  memStage("сторінка");
+  logEvent(wifiTuneText());
+  logEvent(memBootLine());               // 1.0.38: куди пішла пам'ять на запуску
   printInfo();
   //  Сторож основного циклу: 30 с (довше за будь-який запит сторінки).
   esp_task_wdt_config_t wdt = { .timeout_ms = 30000, .idle_core_mask = 1, .trigger_panic = true };   // і простій ядра 0 (Wi-Fi)
@@ -233,8 +251,10 @@ void setup() {
 }
 
 void loop() {
+  memSample();                                   // 1.0.38: найменше вільної пам'яті — кожні 20 мс
   bridgeLoop();
   watchLoop();
+  bmsLoop();                                     // 1.0.36: батарея — сповіщення
   schLoop();
   tgLoop();
   webLoop();

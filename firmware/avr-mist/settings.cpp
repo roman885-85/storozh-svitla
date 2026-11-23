@@ -34,6 +34,8 @@ void settingsLoad() {
   S.tgChats     = gs("tgChats", "");
   S.avrMac      = gs("avrMac", "");
   S.mayakOn     = gb("mayak", false);
+  S.bmsOn       = gb("bmsOn", false);
+  S.mdnsOn      = gb("mdnsOn", false);
   S.notifyStart = gb("nStart", true);
   S.offSec      = gu("offSec", 12);     // 1.0.29: було 30 (і ще +8 с на ping) — власник: «не больше 15»
   S.onSec       = gu("onSec", 10);
@@ -134,6 +136,8 @@ bool settingsSave() {
   p.putString("tgChats", S.tgChats);
   p.putString("avrMac", S.avrMac);
   p.putBool("mayak", S.mayakOn);
+  p.putBool("bmsOn", S.bmsOn);
+  p.putBool("mdnsOn", S.mdnsOn);
   p.putBool("nStart", S.notifyStart);
   p.putUShort("offSec", S.offSec);
   p.putUShort("onSec", S.onSec);
@@ -236,6 +240,24 @@ bool settingsSaveBeacons() {
   return true;
 }
 
+bool settingsSaveSch() {
+  if (wiped) return false;
+  Preferences p;
+  if (!p.begin(NS, false)) return false;
+  p.putBool("schOn", S.schOn);
+  p.end();
+  return true;
+}
+
+bool settingsSaveBms() {
+  if (wiped) return false;
+  Preferences p;
+  if (!p.begin(NS, false)) return false;
+  p.putBool("bmsOn", S.bmsOn);
+  p.end();
+  return true;
+}
+
 void settingsFactoryReset() {
   Preferences p;
   if (p.begin(NS, false)) { p.clear(); p.end(); }
@@ -248,8 +270,11 @@ void settingsFactoryReset() {
 //  версіях теж скидатимуться самі: стирається все, чого немає в KEEP.
 bool settingsResetPrefs() {
   static const char* KEEP[] = {"staSsid", "staPass", "staBssid", "apSsid", "apPass", "admin", "tgToken", "tgChats", "avrMac", "bcn"};
-  static char keys[96][NVS_KEY_NAME_MAX_SIZE];
   if (wiped) return false;
+  //  1.0.38: список ключів — у купі лише на час скидання (було 1,5 КБ статичної пам'яті назавжди)
+  typedef char Key[NVS_KEY_NAME_MAX_SIZE];
+  Key* keys = (Key*)malloc(96 * sizeof(Key));
+  if (!keys) return false;
   int n = 0;
   nvs_iterator_t it = nullptr;
   esp_err_t r = nvs_entry_find(NVS_DEFAULT_PART_NAME, NS, NVS_TYPE_ANY, &it);
@@ -263,9 +288,10 @@ bool settingsResetPrefs() {
   }
   nvs_release_iterator(it);
   Preferences p;
-  if (!p.begin(NS, false)) return false;
+  if (!p.begin(NS, false)) { free(keys); return false; }
   for (int i = 0; i < n; i++) p.remove(keys[i]);
   p.end();
+  free(keys);
   settingsLoad();
   return true;
 }

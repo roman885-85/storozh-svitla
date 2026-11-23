@@ -65,6 +65,29 @@ bool findClient(const uint8_t mac[6], ApDev& out) {
 static uint8_t avrMacC[6];
 static bool avrMacOk = false;
 static volatile uint32_t probeN = 0, probeAvrN = 0;   // запитів пошуку мережі від запуску: усіх і від АВР (для сторінки)
+//  1.0.38: події «запит пошуку мережі» — лише поки АВР не в точці (тоді вони й потрібні: «АВР шукає мережу»). Поки АВР
+//  на місці — вимкнено: у повній церкві це десятки подій на секунду від чужих телефонів, кожна — пам'ять і черга подій.
+static int8_t probeEv = -1;                           // -1 — ще не виставляли, 0 — вимкнено, 1 — увімкнено
+static bool gApOk = false;                            // точка запустилась
+static volatile bool gStaEver = false;                // роутер під'єднувався хоч раз від запуску
+//  1.0.39: тримати пристрій поза точкою N секунд — щойно під'єднується, від'єднуємо. Для мосту батареї 1.0.1: без
+//  мережі Сторожа він за 3 хв сам вмикає сторінку налаштування, і тоді його можна налаштувати звідси (вибрати BMS),
+//  коли поруч нікого немає, щоб натиснути кнопку BOOT. Інших пристроїв не зачіпає.
+static uint8_t kickMac[6];
+static volatile int64_t kickUntilUs = 0;
+static volatile uint32_t kickN = 0;
+void bridgeKick(const uint8_t mac[6], int sec) {
+  memcpy(kickMac, mac, 6);
+  kickN = 0;
+  kickUntilUs = sec > 0 ? nowUs() + (int64_t)sec * 1000000 : 0;
+  uint16_t aid = 0;
+  if (sec > 0 && esp_wifi_ap_get_sta_aid(mac, &aid) == ESP_OK && aid) { esp_wifi_deauth_sta(aid); kickN++; }
+}
+int bridgeKickLeft() { int64_t l = kickUntilUs - nowUs(); return kickUntilUs && l > 0 ? (int)(l / 1000000) : 0; }
+static void probeEvents(bool on) {
+  if (probeEv == (on ? 1 : 0)) return;
+  if (esp_wifi_set_event_mask(on ? WIFI_EVENT_MASK_NONE : WIFI_EVENT_MASK_AP_PROBEREQRECVED) == ESP_OK) probeEv = on ? 1 : 0;
+}
 
 // ---------- події Wi-Fi (потік arduino_events) ----------
 static void onWifi(arduino_event_id_t ev, arduino_event_info_t info) {
@@ -84,6 +107,11 @@ static void onWifi(arduino_event_id_t ev, arduino_event_info_t info) {
     }
     case ARDUINO_EVENT_WIFI_AP_STACONNECTED: {
       const uint8_t* m = info.wifi_ap_staconnected.mac;
+      if (kickUntilUs && nowUs() < kickUntilUs && !memcmp(m, kickMac, 6)) {     // 1.0.39: цей пристрій зараз тримаємо поза точкою
+        esp_wifi_deauth_sta(info.wifi_ap_staconnected.aid);
+        kickN++;
+        break;
+      }
       xSemaphoreTake(mtx, portMAX_DELAY);
       ApDev* c = getLocked(m);
       int64_t away = -1;
@@ -125,6 +153,7 @@ static void onWifi(arduino_event_id_t ev, arduino_event_info_t info) {
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       gStaUp = true;
       gStaGotIp = true;
+      gStaEver = true;
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
       if (gStaUp) logEvent("Зв'язок з роутером втрачено (код " + String(info.wifi_sta_disconnected.reason) + ")");
@@ -263,6 +292,18 @@ static void natCheck(int64_t now) {
   natState = on ? 1 : 0;
 }
 
+//  1.0.38: назва avr-mist.local — за галочкою, діє одразу (і після «Зберегти» без перезапуску)
+static bool mdnsUp = false;
+void bridgeMdns() {
+  if (S.mdnsOn && !mdnsUp) {
+    mdnsUp = MDNS.begin("avr-mist");
+    if (mdnsUp) MDNS.addService("http", "tcp", 80);
+  } else if (!S.mdnsOn && mdnsUp) {
+    MDNS.end();
+    mdnsUp = false;
+  }
+}
+
 // ---------- запуск ----------
 void bridgeBegin() {
   mtx = xSemaphoreCreateMutex();
@@ -286,10 +327,12 @@ void bridgeBegin() {
   natBootOk = WiFi.AP.enableNAPT(true);    // як у 1.0.0–1.0.1; що з ним стало, звіряє natCheck() у bridgeLoop
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
   esp_wifi_set_inactive_time(WIFI_IF_AP, 120);
-  esp_wifi_set_event_mask(WIFI_EVENT_MASK_NONE);   // 1.0.31: і запити пошуку мережі (типово вимкнено) — ознака життя АВР
+  probeEvents(true);                               // 1.0.31: запити пошуку мережі — ознака життя АВР; 1.0.38: лише поки АВР не в точці
   curCh = ch;
-  MDNS.begin("avr-mist");
-  MDNS.addService("http", "tcp", 80);
+  gApOk = apOk;
+  //  1.0.38: назва avr-mist.local (mDNS) — лише за галочкою в «Налаштуваннях»: окрема задача й ~8 КБ пам'яті, плюс
+  //  розбір кожного mDNS-пакета в мережі церкви. Сторінку відкривають за адресою (рядок «Роутер») чи через KeenDNS.
+  bridgeMdns();
   logEvent(String(apOk ? "Точка «" : "ПОМИЛКА: не запустилась точка «") + S.apSsid + "» на каналі " + String(ch) +
            (S.staSsid.length() ? (gStaUp ? ", роутер під'єднано" : ", роутер поки не відповідає") : ", роутер не налаштовано"));
 }
@@ -429,9 +472,20 @@ void bridgeLoop() {
   }
   if (!ip) pingStop();
   else if (ip != pingIp || memcmp(am, pingMac, 6)) { pingStop(); memcpy(pingMac, am, 6); pingStart(ip); }
+  //  1.0.38: запити пошуку слухаємо, лише коли АВР призначено, а в точці його немає
+  bool avrIn = false;
+  if (have) {
+    xSemaphoreTake(mtx, portMAX_DELAY);
+    ApDev* c = findLocked(am);
+    avrIn = c && c->assoc;
+    xSemaphoreGive(mtx);
+  }
+  probeEvents(have && !avrIn);
 }
 
 bool staUp() { return gStaUp; }
+//  1.0.38, для перевірки нової прошивки: Wi-Fi справді працює — точка запустилась і, якщо роутер задано, він під'єднувався
+bool bridgeNetOk() { return gApOk && (!S.staSsid.length() || gStaEver); }
 int apChannel() { return curCh; }
 int64_t apChannelChangedUs() { return chChangedUs; }
 String staIpStr() { return gStaUp ? WiFi.localIP().toString() : String(); }
@@ -458,7 +512,8 @@ String bridgeJson() {
   if (gStaUp) o += ",\"ip\":\"" + WiFi.localIP().toString() + "\",\"rssi\":" + String(WiFi.RSSI()) + ",\"gw\":\"" + WiFi.gatewayIP().toString() + "\"" +
                     ",\"bssid\":\"" + WiFi.BSSIDstr() + "\",\"pref\":" + (onPreferred() ? "true" : "false");
   o += "},\"ap\":{\"ssid\":\"" + jsonEsc(S.apSsid) + "\",\"ch\":" + String(curCh) + ",\"ip\":\"10.77.0.1\",\"nat\":" + String(natFlag() ? "true" : "false") +
-       ",\"probes\":" + String((unsigned)probeN) + ",\"probesAvr\":" + String((unsigned)probeAvrN) + "},\"clients\":[";
+       ",\"probes\":" + String((unsigned)probeN) + ",\"probesAvr\":" + String((unsigned)probeAvrN) + ",\"probeEv\":" + String(probeEv == 1 ? "true" : "false") +
+       ",\"mdns\":" + String(mdnsUp ? "true" : "false") + ",\"kick\":" + String(bridgeKickLeft()) + ",\"kickN\":" + String((unsigned)kickN) + "},\"clients\":[";
   ApDev cs[MAXC];
   int n = clientsSnapshot(cs, MAXC);
   int64_t now = nowUs();

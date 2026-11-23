@@ -72,6 +72,9 @@ void lcdAlert(int, const String&, int) {}   // 1.0.26: ефекти диспле
 String schLostNote() { return String(); }
 String schBackNote() { return String(); }
 String schStatusLine() { return String(); }
+static int g_bmsPkts = 0;                   // 1.0.36: батарея — свої перевірки в tests/bat; тут — лише що пакет дійшов
+void bmsPacket(char* m, uint32_t) { if (!strncmp(m, "BMS1 ", 5)) g_bmsPkts++; }
+String bmsStatusLine() { return String(); }
 
 // --- Telegram ---
 struct Sent { int64_t at; std::string text; bool silent; uint16_t cat; };
@@ -397,6 +400,18 @@ int main() {
   int64_t t22 = T, off22 = 0;
   for (int k = 0; k < 60 && !off22; k++) { run(T / 1000000 + 1); if (grid.st == T_OFF) off22 = T; }
   check(off22 && (off22 - t22) / 1000000 <= 15, "«міста немає» за ≤ 15 с");
+
+  puts("23) Пакет мосту батареї «BMS1 …» (1.0.36) іде до батареї, маячком не стає");
+  size_t logs23 = g_log.size(), bcn23 = 0;
+  for (auto& b : bs) if (b.used) bcn23++;
+  std::string big = "BMS1 80:65:99:88:65:21 up=5 rssi=-60 ver=1.0.0 st=2 rc=1 bad=0 age=1 fmt=32 soc=77 v=26500 i=-1200 c=";
+  for (int i = 0; i < 32; i++) big += (i ? ",3301" : "3301");                  // ~300 байт — більше за старий буфер 160
+  g_pkts.push_back({T + 100000, IPAddress(10, 77, 0, 31), big});
+  g_pkts.push_back({T + 200000, IPAddress(192, 168, 1, 5), "BMS1 80:65:99:88:65:22 up=1"});   // не з мережі моста — відкинути
+  run(T / 1000000 + 2);
+  size_t bcnAfter = 0; for (auto& b : bs) if (b.used) bcnAfter++;
+  bool noBeaconLog = true; for (size_t k = logs23; k < g_log.size(); k++) if (has(g_log[k], "80:65:99:88:65:2")) noBeaconLog = false;
+  check(g_bmsPkts == 1 && bcnAfter == bcn23 && noBeaconLog, "один пакет — до батареї; маячків не додалось; чужа мережа — відкинуто");
 
   printf("\n%s: %d помилок\n", fails ? "НЕ ПРОЙДЕНО" : "УСЕ ПРОЙДЕНО", fails);
   return fails ? 1 : 0;

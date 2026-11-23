@@ -10,6 +10,7 @@
 #include "lcd.h"
 #include "box.h"
 #include "rtc_watch.h"
+#include "bms.h"
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
@@ -99,12 +100,13 @@ static void pollUdp() {
   for (int k = 0; k < 8; k++) {
     int n = udp.parsePacket();
     if (n <= 0) break;
-    char b[160];
+    char b[600];                                     // 1.0.36: пакет мосту батареї — до ~450 байт
     int len = udp.read(b, sizeof(b) - 1);
     if (len < 0) len = 0;
     b[len] = 0;
     IPAddress rip = udp.remoteIP();
     if (rip[0] != 10 || rip[1] != 77 || rip[2] != 0) continue;          // лише з мережі моста
+    if (!strncmp(b, "BMS1 ", 5)) { bmsPacket(b, (uint32_t)rip); continue; }   // 1.0.36: міст батареї
     if (strncmp(b, "MAYAK1 ", 7)) continue;
     char macs[24] = {0}, ver[16] = {0};
     unsigned long up = 0;
@@ -601,6 +603,7 @@ String statusReport() {
     r += "\n🔌 " + htmlEsc(bname(i)) + ": " + (t.st == T_ON ? "є напруга · " + sinceText(t) : t.st == T_OFF ? "немає напруги · " + sinceText(t) : String("визначається"));
   }
   r += schStatusLine();                          // 1.0.20: графік YASNO
+  r += bmsStatusLine();                          // 1.0.36: батарея
   r += "\n📡 Сторож працює " + fmtDur(now / 1000000) + (staUp() ? ", Wi-Fi " + String(staRssi()) + " дБм" : ", роутер не відповідає");
   return r;
 }
