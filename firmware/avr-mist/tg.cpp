@@ -528,7 +528,7 @@ static const char* const BIT_NAME[] = {"усі сповіщення", "світ�
 //  adm — вигляд для адміністратора (інший користувач): ще «👑» і «🗑». У даних кнопки: n — свій вигляд, N — адміністратора.
 static String notifyText(int i, bool adm) {
   const Chat& c = rec[i];
-  String t = "🔔 <b>Сповіщення: " + htmlEsc(who(c)) + "</b>\n⛪ " + htmlEsc(S.objName);
+  String t = "🔔 <b>Сповіщення: " + htmlEsc(who(c)) + "</b>\n" + objIco() + htmlEsc(S.objName);
   if (!(c.fl & RF_ON)) t += "\n🔕 Зараз сповіщення вимкнено зовсім. Кнопки «📊 Стан», «🗓 Графік», «📈 Статистика» працюють.";
   else t += "\nНатисніть, щоб увімкнути ✅ чи вимкнути ⬜:\n· світло — зникло й повернулось міське світло\n· генератор — запустився, зупинився, «вимкніть»\n"
             "· графік — попередження перед відключенням і графік на завтра\n· підсумок — щодня, скільки світло було\n· службові — Сторож перезапустився, пароль\n"
@@ -555,7 +555,7 @@ static String notifyMk(int i, bool adm) {
   return m + "]}";
 }
 static String usersText() {
-  String t = "👥 <b>Користувачі бота</b>\n⛪ " + htmlEsc(S.objName) + " · " + String(nrec) + " з " + String(MAXR);
+  String t = "👥 <b>Користувачі бота</b>\n" + objIco() + htmlEsc(S.objName) + " · " + String(nrec) + " з " + String(MAXR);
   for (int i = 0; i < nrec; i++) {
     const Chat& c = rec[i];
     int cats = 0;
@@ -590,7 +590,7 @@ static void askAdmins(long long id, const String& name, const String& text) {
   reqs[k].name = name;
   reqs[k].us = now;
   if (!adminCount()) return;
-  String t = "👤 <b>Хоче отримувати сповіщення</b>\n⛪ " + htmlEsc(S.objName) + "\n" + htmlEsc(name.length() ? name : String("без імені")) + " · " +
+  String t = "👤 <b>Хоче отримувати сповіщення</b>\n" + objIco() + htmlEsc(S.objName) + "\n" + htmlEsc(name.length() ? name : String("без імені")) + " · " +
              (id < 0 ? "група" : "людина") + " · " + String(id) + (text.length() ? "\nНаписав(ла): «" + htmlEsc(text.substring(0, 60)) + "»" : String());
   String mk = "{\"inline_keyboard\":[[" + btn("✅ Додати", "a:" + String(id)) + "," + btn("✖️ Ні", "x:" + String(id)) + "]]}";
   for (int i = 0; i < nrec; i++) if (rec[i].fl & RF_ADMIN) replyMk(rec[i].id, t, mk);
@@ -603,7 +603,7 @@ static String reqName(long long id) {
 }
 
 static String helpText(bool adm) {
-  return String("ℹ️ <b>Як користуватись</b>\n⛪ ") + htmlEsc(S.objName) +
+  return String("ℹ️ <b>Як користуватись</b>\n") + objIco() + htmlEsc(S.objName) +
          "\n«📊 Стан» — є світло чи ні, генератор, графік\n«🗓 Графік» — графік відключень на сьогодні й завтра\n«📈 Статистика» — скільки світло було й не було"
          "\n«🔔 Сповіщення» — що надсилати саме вам (і вночі без звуку)" +
          (adm ? "\n«👥 Користувачі» — хто отримує і що; заявки нових людей\n«📋 Журнал» — останні події Сторожа"
@@ -617,7 +617,7 @@ static String helpText(bool adm) {
 struct AnnDraft { long long chat = 0; int64_t waitUs = 0; String text, by; };
 static AnnDraft ann;
 static String annMsg(const String& text, const String& by) {
-  return "📣 <b>Оголошення</b>\n⛪ " + htmlEsc(S.objName) + " · %T\n\n" + htmlEsc(text) + (by.length() ? "\n\n— " + htmlEsc(by) : String());
+  return "📣 <b>Оголошення</b>\n" + objIco() + htmlEsc(S.objName) + " · %T\n\n" + htmlEsc(text) + (by.length() ? "\n\n— " + htmlEsc(by) : String());
 }
 static int annCount() { int n = 0; for (int i = 0; i < nrec; i++) if (rec[i].fl & RF_ON) n++; return n; }
 int tgAnnounce(const String& text, const String& by, const long long* ids, int nIds, bool silent) {
@@ -649,7 +649,7 @@ int tgAnnounce(const String& text, const String& by, const long long* ids, int n
 //  «🛠 Сторож» (1.0.23): усе про сам прилад — щоб адміністратор бачив його стан без сторінки
 static String diagText() {
   int64_t now = nowUs();
-  String r = "🛠 <b>Сторож світла</b>\n⛪ " + htmlEsc(S.objName) + " · " + fmtHM(now) +
+  String r = "🛠 <b>Сторож світла</b>\n" + objIco() + htmlEsc(S.objName) + " · " + fmtHM(now) +
              "\nПрошивка " FW_VERSION ", працює " + fmtDur(now / 1000000) + "\nОстанній запуск: " + htmlEsc(resetReasonText()) +
              "\nПам'ять: вільно " + String(memFree() / 1024) + " КБ, найменше було " + String(memMin() / 1024) + " КБ" +
              "\n📶 Wi-Fi: " + (staUp() ? htmlEsc(S.staSsid) + ", " + String(staRssi()) + " дБм" : String("роутер не відповідає"));
@@ -686,7 +686,7 @@ static void command(const In& m) {
   auto is = [&](std::initializer_list<const char*> l) { for (const char* x : l) if (w == x) return true; return false; };
   if (!rcp) {
     //  1.0.21: заявка адміністраторам замість «попросіть адміністратора» вручну
-    tgReply(chat, "👋 <b>Вітаю!</b>\nТут сповіщення про міське світло: ⛪ " + o + ".\n" +
+    tgReply(chat, "👋 <b>Вітаю!</b>\nТут сповіщення про міське світло: " + objIco() + o + ".\n" +
                   (adminCount() ? String("Я передав ваш запит адміністраторові — щойно він підтвердить, сповіщення почнуть приходити.")
                                 : String("Щоб отримувати їх, попросіть адміністратора додати вас: сторінка «Сторожа світла», вкладка «Сповіщення».")));
     askAdmins(chat, name, cmd.startsWith("/start") ? String() : text);
@@ -704,7 +704,7 @@ static void command(const In& m) {
     return;
   }
   if (is({"/log", "Журнал", "журнал"})) {
-    if (adm && chat > 0) tgReply(chat, "📋 <b>Журнал Сторожа</b>\n⛪ " + o + " · останні події, нові згори" + logText(20, 3300), 1);
+    if (adm && chat > 0) tgReply(chat, "📋 <b>Журнал Сторожа</b>\n" + objIco() + o + " · останні події, нові згори" + logText(20, 3300), 1);
     else tgReply(chat, chat > 0 ? "📋 Журнал — лише для адміністратора." : "📋 Журнал — в особистому чаті з ботом.", 1);
     return;
   }
@@ -743,7 +743,7 @@ static void command(const In& m) {
     return;
   }
   if (cmd == "/start" || cmd == "/help" || is({"Довідка", "довідка"})) {
-    tgReply(chat, cmd == "/start" ? "👋 <b>Вітаю!</b>\nВи отримуєте сповіщення про міське світло: ⛪ " + o + ".\n\n" + helpText(adm) : helpText(adm), 1);
+    tgReply(chat, cmd == "/start" ? "👋 <b>Вітаю!</b>\nВи отримуєте сповіщення про міське світло: " + objIco() + o + ".\n\n" + helpText(adm) : helpText(adm), 1);
     return;
   }
 }
@@ -926,12 +926,12 @@ static void botProfile(const String& token) {
                                  "{\"command\":\"help\",\"description\":\"ℹ️ Як користуватись\"},"
                                  "{\"command\":\"start\",\"description\":\"Про бота\"}]}", r);
   if (call(token, "getMyShortDescription", "{}", r) == 200 && !jStr(r, "\"short_description\":\"").length())
-    call(token, "setMyShortDescription", "{\"short_description\":\"" + jsonEsc("⛪ " + o + ": сповіщення про міське світло") + "\"}", r);
+    call(token, "setMyShortDescription", "{\"short_description\":\"" + jsonEsc(objIco() + o + ": сповіщення про міське світло") + "\"}", r);
   //  Опис: порожній — ставимо; старий наш (до 1.0.11 — «адміністратора моста») — замінюємо; інший — це вже власника.
   if (call(token, "getMyDescription", "{}", r) == 200) {
     String d = jStr(r, "\"description\":\"");
     if (!d.length() || d.indexOf("моста") >= 0)
-      call(token, "setMyDescription", "{\"description\":\"" + jsonEsc("⛪ " + o + "\n\nСторож світла: повідомляю, коли зникає й повертається "
+      call(token, "setMyDescription", "{\"description\":\"" + jsonEsc(objIco() + o + "\n\nСторож світла: повідомляю, коли зникає й повертається "
                                       "міське світло і чи працює генератор.\n\nНатисніть «Почати» й попросіть адміністратора додати вас "
                                       "до сповіщень.\nКнопка «📊 Стан» — стан зараз.") + "\"}", r);
   }
@@ -1170,10 +1170,10 @@ String tgJson() {
 //  Людині, яку додали чи прибрали на сторінці, — коротке підтвердження (1.0.4, власник: додавати й видаляти
 //  одержувачів має бути просто й зрозуміло).
 void tgWelcome(long long chat) {
-  tgReply(chat, "✅ <b>Вас додано до сповіщень</b>\n⛪ " + htmlEsc(S.objName) +
+  tgReply(chat, "✅ <b>Вас додано до сповіщень</b>\n" + objIco() + htmlEsc(S.objName) +
                 "\nСюди приходитимуть повідомлення, коли зникає й повертається міське світло.\nКнопки внизу: «📊 Стан» — що зараз, «🗓 Графік» — графік відключень, "
                 "«📈 Статистика» — скільки світло було й не було, «🔔 Сповіщення» — що надсилати саме вам.", 1);
 }
 void tgFarewell(long long chat) {
-  tgReply(chat, "🔕 <b>Сповіщення вимкнено</b>\n⛪ " + htmlEsc(S.objName) + "\nЩоб отримувати їх знову, попросіть адміністратора.", 2);
+  tgReply(chat, "🔕 <b>Сповіщення вимкнено</b>\n" + objIco() + htmlEsc(S.objName) + "\nЩоб отримувати їх знову, попросіть адміністратора.", 2);
 }

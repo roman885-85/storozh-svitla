@@ -383,7 +383,7 @@ static String updText(const char* u) {
 }
 
 String schReport() {
-  String r = "🗓 <b>Графік відключень</b>\n⛪ " + htmlEsc(S.objName);
+  String r = "🗓 <b>Графік відключень</b>\n" + objIco() + htmlEsc(S.objName);
   if (!S.schOn || !S.schQueue.length())
     return r + "\nГрафік не налаштовано. Адміністратор вмикає його на сторінці Сторожа: «Налаштування → Графік відключень».";
   r += " · " + qName() + " · " + schDsoName(S.schRegion, S.schDso);
@@ -498,7 +498,7 @@ void schLoop() {
         M.warnedAt = (int32_t)at;
         rySave(M);
         if (watchGrid() != 0) {
-          tgBroadcast(now, "⏰ <b>За графіком відключення " + whenText(st) + "</b>\n⛪ " + obj() + " · " + qName() +
+          tgBroadcast(now, "⏰ <b>За графіком відключення " + whenText(st) + "</b>\n" + objIco() + obj() + " · " + qName() +
                            "\n🗓 через " + leftText(left) + ", до " + endText(L, L.sg[k].e), false, RF_SCHED);
           lcdAlert(LCD_A_WARN, "УВАГА: " + whenText(st) + " відключення за графіком, до " + endText(L, L.sg[k].e), left * 60);   // 1.0.26
         }
@@ -515,12 +515,12 @@ void schLoop() {
   uint8_t ds = L.dToday >= 0 ? y.d[L.dToday].st : 0;
   if (base && S.schTom) {
     if (L.dTom >= 0 && L.stTom == 1 && (strcmp(M.tomDay, d1) || th != M.tomHash))
-      tgBroadcast(now, "🗓 <b>Графік на завтра, " + dm(d1) + (strcmp(M.tomDay, d1) ? String("</b>") : String(" — змінився</b>")) + "\n⛪ " + obj() + " · " + qName() +
+      tgBroadcast(now, "🗓 <b>Графік на завтра, " + dm(d1) + (strcmp(M.tomDay, d1) ? String("</b>") : String(" — змінився</b>")) + "\n" + objIco() + obj() + " · " + qName() +
                        "\n" + dayText(y, L.dTom, d1), true, RF_SCHED);
     if (L.dToday >= 0 && !strcmp(M.todDay, d0) && dh != M.todHash) {
-      if (ds == 3 && M.todSt != 3) tgBroadcast(now, "⚠️ <b>YASNO: аварійні відключення</b>\n⛪ " + obj() + " · " + qName() + "\nГрафік зараз не діє: світло можуть вимкнути будь-коли.", false, RF_SCHED);
-      else if (ds == 1 && M.todSt == 3) tgBroadcast(now, "🗓 <b>Графік знову діє</b>\n⛪ " + obj() + " · " + qName() + "\nСьогодні: " + dayText(y, L.dToday, d0), false, RF_SCHED);
-      else if (ds == 1) tgBroadcast(now, "🗓 <b>Графік на сьогодні змінився</b>\n⛪ " + obj() + " · " + qName() + "\n" + dayText(y, L.dToday, d0), true, RF_SCHED);
+      if (ds == 3 && M.todSt != 3) tgBroadcast(now, "⚠️ <b>YASNO: аварійні відключення</b>\n" + objIco() + obj() + " · " + qName() + "\nГрафік зараз не діє: світло можуть вимкнути будь-коли.", false, RF_SCHED);
+      else if (ds == 1 && M.todSt == 3) tgBroadcast(now, "🗓 <b>Графік знову діє</b>\n" + objIco() + obj() + " · " + qName() + "\nСьогодні: " + dayText(y, L.dToday, d0), false, RF_SCHED);
+      else if (ds == 1) tgBroadcast(now, "🗓 <b>Графік на сьогодні змінився</b>\n" + objIco() + obj() + " · " + qName() + "\n" + dayText(y, L.dToday, d0), true, RF_SCHED);
     }
   }
   base = true;

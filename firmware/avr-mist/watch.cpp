@@ -166,7 +166,7 @@ static String durSince(const Change& c, int64_t at) {
 //  видно вже у сповіщенні на екрані телефона. Другий — об'єкт і час події, далі подробиці. Режим HTML Telegram,
 //  усе змінне — через htmlEsc (не прийме оформлення — tg.cpp надішле той самий текст без нього).
 static String head(const char* icon, const char* title, const String& when) {
-  return String(icon) + " <b>" + title + "</b>\n⛪ " + htmlEsc(obj()) + (when.length() ? " · " + when : String());
+  return String(icon) + " <b>" + title + "</b>\n" + objIco() + htmlEsc(obj()) + (when.length() ? " · " + when : String());
 }
 static String statusIconText() {
   if (!avrAssigned()) return "⚪ " + statusShort();
@@ -589,7 +589,7 @@ static String sinceText(const Track& t) {
 
 String statusReport() {
   int64_t now = nowUs();
-  String r = "📊 <b>Стан зараз</b>\n⛪ " + htmlEsc(obj()) + " · " + fmtHM(now);
+  String r = "📊 <b>Стан зараз</b>\n" + objIco() + htmlEsc(obj()) + " · " + fmtHM(now);
   if (!avrAssigned()) r += "\n⚪ АВР ще не призначено";
   else if (grid.st == T_UNK) r += "\n⏳ Стан визначається";
   else r += String(grid.st == T_ON ? "\n🟢 Міське світло є · " : "\n🔴 Міського світла немає · ") + sinceText(grid);

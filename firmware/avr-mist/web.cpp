@@ -254,7 +254,7 @@ static void hLogin() {
   hourFails++;
   if (hourFails >= 10 && (!alertUs || now - alertUs > 3600LL * 1000000)) {
     alertUs = now;
-    tgBroadcast(now, "🔐 <b>Хтось підбирає пароль сторінки Сторожа</b>\n⛪ " + htmlEsc(S.objName) + " · " + String(hourFails) +
+    tgBroadcast(now, "🔐 <b>Хтось підбирає пароль сторінки Сторожа</b>\n" + objIco() + htmlEsc(S.objName) + " · " + String(hourFails) +
                      " невдалих спроб за годину, остання з " + htmlEsc(clientIp()) +
                      "\nЯкщо це не ви — змініть пароль сторінки: «Налаштування → Пароль сторінки».", false, C_ADMIN);
   }
@@ -620,7 +620,7 @@ static void hState() {
 static void hSettingsGet() {
   if (!auth()) return;
   String hint = S.tgToken.length() ? S.tgToken.substring(0, S.tgToken.indexOf(':') > 0 ? S.tgToken.indexOf(':') : 0) + ":…" : String();
-  String o = "{\"obj\":\"" + jsonEsc(S.objName) + "\",\"staSsid\":\"" + jsonEsc(S.staSsid) + "\",\"staPassSet\":" + b(S.staPass.length()) + ",\"staBssid\":\"" + jsonEsc(S.staBssid) + "\"" +
+  String o = "{\"obj\":\"" + jsonEsc(S.objName) + "\",\"objIco\":\"" + jsonEsc(S.objIcon) + "\",\"staSsid\":\"" + jsonEsc(S.staSsid) + "\",\"staPassSet\":" + b(S.staPass.length()) + ",\"staBssid\":\"" + jsonEsc(S.staBssid) + "\"" +
              ",\"apSsid\":\"" + jsonEsc(S.apSsid) + "\",\"tgTokenSet\":" + b(S.tgToken.length()) + ",\"tgTokenHint\":\"" + jsonEsc(hint) +
              "\",\"tgChats\":\"" + jsonEsc(S.tgChats) + "\",\"avrMac\":\"" + jsonEsc(S.avrMac) + "\",\"mayakOn\":" + b(S.mayakOn) + ",\"mdnsOn\":" + b(S.mdnsOn) +
              ",\"notifyStart\":" + b(S.notifyStart) + ",\"offSec\":" + String(S.offSec) + ",\"onSec\":" + String(S.onSec) +
@@ -654,6 +654,14 @@ static void hSettingsPost() {
   if (!auth()) return;
   Settings n = S;
   if (srv.hasArg("obj")) { n.objName = srv.arg("obj"); n.objName.trim(); if (!n.objName.length()) n.objName = "Об'єкт"; if (n.objName.length() > 80) return fail("Назва задовга"); }
+  if (srv.hasArg("objIco")) {                              // 1.0.47: значок перед назвою; порожньо — без значка
+    n.objIcon = srv.arg("objIco"); n.objIcon.trim();
+    if (n.objIcon.length() > 16) return fail("Значок — один-два емодзі (до 16 байтів)");
+    for (size_t i = 0; i < n.objIcon.length(); i++) {
+      char c = n.objIcon[i];
+      if (c == '<' || c == '>' || c == '&' || c == '"' || (uint8_t)c < 0x20) return fail("Значок — емодзі чи символ, без < > & \"");
+    }
+  }
   if (srv.hasArg("staSsid")) { n.staSsid = srv.arg("staSsid"); n.staSsid.replace("\r", ""); n.staSsid.replace("\n", ""); if (n.staSsid.length() > 32) return fail("Назва мережі роутера — до 32 байтів"); }
   if (srv.hasArg("staBssid")) {
     String m = srv.arg("staBssid");

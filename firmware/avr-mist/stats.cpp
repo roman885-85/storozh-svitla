@@ -55,7 +55,7 @@ static String line(const char* name, const sc::Sum& s, bool always) {
 }
 
 static String daySummary(int32_t day, const sc::Sum& s) {
-  String r = "📈 <b>Підсумок за " + dateOf(day) + "</b>\n⛪ " + htmlEsc(S.objName) +
+  String r = "📈 <b>Підсумок за " + dateOf(day) + "</b>\n" + objIco() + htmlEsc(S.objName) +
              "\n🟢 Світло було " + fmtHours(s.on) + "\n🔴 Не було " + fmtHours(s.off) + " · відключень " + String(s.outs);
   if (s.unk >= 60) r += "\n⚪ Без даних " + fmtHours(s.unk);
   if (R.since && dayOf(R.since) == day) r += "\n<i>Облік із " + clockAt(R.since, false) + "</i>";
@@ -109,7 +109,7 @@ void statsTransition(int from, int to, int64_t atUs, bool approx) {
 }
 
 String statsReport() {
-  String r = "📈 <b>Статистика світла</b>\n⛪ " + htmlEsc(S.objName);
+  String r = "📈 <b>Статистика світла</b>\n" + objIco() + htmlEsc(S.objName);
   if (!clockValid()) return r + "\nГодинник ще не встановлено — статистика буде за хвилину.";
   int32_t d = today();
   r += line("Сьогодні", sc::sum(R, d, d), true);

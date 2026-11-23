@@ -232,7 +232,9 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
  <div class="card"><button class="p" data-act="sigsave">Зберегти</button> <span class="mut">Звук перевірки грає з гучністю повзунка; решта перевірок — збережене: змінили вивід чи звук, то спершу «Зберегти».</span><div id="g_msg"></div></div>
 </section>
 <section id="set" class="hide">
- <div class="card"><b>Об'єкт</b><label>Назва в повідомленнях</label><input id="f_obj" maxlength="40"></div>
+ <div class="card"><b>Об'єкт</b><label>Назва в повідомленнях</label><input id="f_obj" maxlength="40">
+  <label>Значок перед назвою (порожньо — без значка)</label><div class="flex" style="align-items:center"><input id="f_objIco" maxlength="8" style="max-width:76px;flex:none;font-size:20px;text-align:center"><span id="icopick"></span></div>
+  <div class="mut" style="margin-top:6px">У повідомленні: «<span id="icoprev"></span>»</div></div>
  <div class="card"><b>Wi-Fi роутера</b>
   <label>Мережа</label><div class="flex"><input id="f_staSsid" maxlength="32"><button data-act="scan">Знайти</button></div>
   <select id="scanl" class="hide"></select>
@@ -494,9 +496,13 @@ async function bcnPost(mac,role,name,okText){const b=bcnList.find(x=>x.mac===mac
  try{await j('/api/beacon',{method:'POST',body:new URLSearchParams({mac:mac,act:'set',role:role,name:name})});note('bcnmsg',okText);bcnReload();return true}catch(err){note('bcnmsg',err.message,1);return false}}
 let curSet=null,annAll=0;
 $('a_to').addEventListener('change',()=>$('a_who').classList.toggle('hide',$('a_to').value!=='sel'));
+//  1.0.47: значок перед назвою об'єкта — швидкий вибір і як виглядатиме другий рядок повідомлення
+const ICONS=['📍','🏢','🏠','🏫','🏪','🏭','🏥','⛪','⚡'];
+function icoPrev(){const i=$('f_objIco').value.trim(),n=$('f_obj').value.trim()||"Об'єкт";$('icoprev').textContent=(i?i+' ':'')+n+' · о 14:02'}
 async function loadSet(){
  try{const s=await j('/api/settings');curSet=s;
-  for(const k of ['obj','staSsid','staBssid','apSsid','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin'])$('f_'+k).value=s[k];
+  for(const k of ['obj','objIco','staSsid','staBssid','apSsid','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin'])$('f_'+k).value=s[k]==null?'':s[k];
+  icoPrev();
   $('f_mdnsOn').checked=!!s.mdnsOn;
   $('f_notifyStart').checked=s.notifyStart;bcnReload();
   $('f_schOn').checked=!!s.schOn;$('f_schTom').checked=!!s.schTom;$('f_schDso').value=s.schDso||'3/301';$('f_schQueue').value=s.schQueue||'';$('f_schWarn').value=s.schWarn;
@@ -529,7 +535,7 @@ async function loadTg(){
 }
 async function save(){
  const p=new URLSearchParams();
- for(const k of ['obj','staSsid','staBssid','staPass','apSsid','apPass','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin','adminPass'])p.append(k,$('f_'+k).value);
+ for(const k of ['obj','objIco','staSsid','staBssid','staPass','apSsid','apPass','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin','adminPass'])p.append(k,$('f_'+k).value);
  p.append('mdnsOn',$('f_mdnsOn').checked?'1':'0');
  p.append('notifyStart',$('f_notifyStart').checked?'1':'0');p.append('pwBtn',$('f_pwBtn').value);
  p.append('schOn',$('f_schOn').checked?'1':'0');p.append('schTom',$('f_schTom').checked?'1':'0');p.append('schDso',$('f_schDso').value);p.append('schQueue',$('f_schQueue').value);p.append('schWarn',$('f_schWarn').value);
@@ -645,6 +651,8 @@ function upload(){
  x.onload=()=>note('umsg',x.responseText,x.status!==200);x.onerror=()=>note('umsg','Обрив зв\'язку',1);
  x.open('POST','/update');x.send(fd);
 }
+$('icopick').innerHTML=ICONS.map(x=>'<button type="button" data-act="icopick" data-ico="'+x+'" style="padding:5px 8px;font-size:18px;margin:2px">'+x+'</button>').join('')+'<button type="button" data-act="icopick" data-ico="" style="padding:5px 8px;margin:2px">без значка</button>';
+['f_obj','f_objIco'].forEach(id=>$(id).addEventListener('input',icoPrev));
 document.addEventListener('click',async e=>{
  const b=e.target.closest('button[data-act]');if(!b)return;const a=b.dataset.act;
  if(a==='save')save();else if(a==='scan')scan();else if(a==='upload')upload();
@@ -690,6 +698,7 @@ document.addEventListener('click',async e=>{
  else if(a==='savesum'){const h=parseInt($('f_sumHour').value,10);if(!(h>=0&&h<=23)){note('summsg','Година — від 0 до 23',1);return}try{await j('/api/settings',{method:'POST',body:new URLSearchParams({sumOn:$('f_sumOn').checked?'1':'0',sumHour:String(h)})});note('summsg','Збережено.')}catch(err){note('summsg',err.message,1)}}
  else if(a==='savetok'){const v=$('f_tgToken').value.trim();if(!v){note('tmsg','Вставте токен від @BotFather',1);return}try{await j('/api/settings',{method:'POST',body:new URLSearchParams({tgToken:v})});note('tmsg','Токен збережено.');loadTg();refresh()}catch(err){note('tmsg',err.message,1)}}
  else if(a==='reboot'){if(!confirm('Перезапустити Сторожа? АВР на кілька секунд втратить Wi-Fi.'))return;try{await j('/api/reboot',{method:'POST'})}catch(err){}note('smsg','Перезапуск…')}
+ else if(a==='icopick'){$('f_objIco').value=b.dataset.ico;icoPrev()}
  else if(a==='bcnpick'){const m=b.dataset.mac,nb=document.querySelector('nav button[data-t="set"]');if(nb)nb.click();
   setTimeout(()=>{$('b_mac').value=m;$('bcncard').scrollIntoView({behavior:'smooth'});$('b_name').focus()},300)}
  else if(a==='assign'){if(!confirm(b.dataset.old?'Вважати АВР-ом пристрій '+b.dataset.mac+' замість '+b.dataset.old+'? Сторож стежитиме за новим.':'Вважати пристрій '+b.dataset.mac+' АВР-ом?'))return;try{await j('/api/assign',{method:'POST',body:new URLSearchParams({mac:b.dataset.mac})});refresh();if(tab==='set')loadSet()}catch(err){alert(err.message)}}

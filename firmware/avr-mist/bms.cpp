@@ -81,7 +81,7 @@ int64_t okSince = 0, badSince = 0;
 int64_t loopUs = 0;                  // останній прохід bmsLoop (раз на секунду)
 
 String obj() { return S.objName.length() ? S.objName : String("Об'єкт"); }
-String head(const char* icon, const String& title) { return String(icon) + " <b>" + title + "</b>\n⛪ " + htmlEsc(obj()) + " · %T"; }
+String head(const char* icon, const String& title) { return String(icon) + " <b>" + title + "</b>\n" + objIco() + htmlEsc(obj()) + " · %T"; }
 
 //  «53,25» з 53250 (мВ, 2 знаки) — коми, як у повідомленнях HA
 String fix(long v, int div, int dec) {

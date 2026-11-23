@@ -53,7 +53,7 @@ never connects or writes to the BMS.
    or with `esptool.py --chip esp32 write_flash 0x0 avr-mist-<version>-full.bin`.
 2. Power Storozh from the router's UPS. Join the "AVR-mist-XXXX" Wi-Fi from a phone (password: "avr" plus the last eight
    characters of the board's MAC address), open http://10.77.0.1, user admin.
-3. Settings: object name, router Wi-Fi, your own page and access point passwords — Save. Reserve a fixed address for
+3. Settings: object name and its icon in messages, router Wi-Fi, your own page and access point passwords — Save. Reserve a fixed address for
    Storozh in the router.
 4. While mains is on, connect the ATS to "AVR-mist-XXXX" in the eWeLink app and press "Це АВР" ("this is the ATS") in the
    "Пристрої" (devices) card.

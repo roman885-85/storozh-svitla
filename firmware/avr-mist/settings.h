@@ -8,6 +8,7 @@
     Правило власника: прилад сам у флеш не пише.  */
 struct Settings {
   String objName;                  // як називати об'єкт у повідомленнях
+  String objIcon;                  // 1.0.47: значок перед назвою в повідомленнях («⛪ Церква», «📍 Офіс»); порожньо — без значка
   String staSsid, staPass;         // Wi-Fi церковного роутера
   String staBssid;                 // бажана точка роутера (BSSID), "" — будь-яка, найсильніша (1.0.3)
   String apSsid, apPass;           // точка моста для АВР і маячка
@@ -76,6 +77,9 @@ struct Settings {
   bool   mdnsOn;
 };
 extern Settings S;
+//  1.0.47: значок і пробіл перед назвою об'єкта в повідомленнях (до 1.0.46 — завжди «⛪ »). Символи < > & " сторінка не
+//  приймає, тож у HTML повідомлень Telegram значок іде як є.
+inline String objIco() { return S.objIcon.length() ? S.objIcon + " " : String(); }
 
 void   settingsLoad();
 bool   settingsSave();

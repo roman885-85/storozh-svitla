@@ -395,7 +395,7 @@ void bridgeLoop() {
         told = true;
         String m = "Сторож 10 хв не на бажаній точці роутера: зараз " + WiFi.BSSIDstr() + " (" + String(WiFi.RSSI()) + " дБм), бажана — " + S.staBssid;
         logEvent(m);
-        tgBroadcast(now, "⚠️ <b>Сторож не на бажаній точці роутера</b>\n⛪ " + htmlEsc(S.objName) + " · %T\nЗараз — " + WiFi.BSSIDstr() + " (" +
+        tgBroadcast(now, "⚠️ <b>Сторож не на бажаній точці роутера</b>\n" + objIco() + htmlEsc(S.objName) + " · %T\nЗараз — " + WiFi.BSSIDstr() + " (" +
                          String(WiFi.RSSI()) + " дБм), бажана — " + htmlEsc(S.staBssid) + ".\nБажаної немає в ефірі або її змінили в налаштуваннях: " +
                          "сторінка Сторожа → «Налаштування» → Wi-Fi роутера.", true, C_ADMIN);
       }

@@ -24,6 +24,9 @@ void settingsLoad() {
   auto gu = [&](const char* k, uint16_t d) { return ok ? p.getUShort(k, d) : d; };
   auto gb = [&](const char* k, bool d) { return ok ? p.getBool(k, d) : d; };
   S.objName     = gs("obj", "Об'єкт");          // 1.0.46: типова — без «Церкви»; збережена лишається
+  //  1.0.47: значок. Ключа ще немає: плата з налаштуваннями старих версій (назву вже збережено) лишається з ⛪, як було
+  //  до 1.0.47; нова плата — 📍. Сам Сторож при цьому нічого у флеш не пише — значок збережеться з наступним «Зберегти».
+  S.objIcon     = ok && p.isKey("objIco") ? p.getString("objIco", "") : String(ok && p.isKey("obj") ? "⛪" : "📍");
   S.staSsid     = gs("staSsid", "");
   S.staPass     = gs("staPass", "");
   S.staBssid    = gs("staBssid", "");
@@ -126,6 +129,7 @@ bool settingsSave() {
   Preferences p;
   if (!p.begin(NS, false)) return false;
   p.putString("obj", S.objName);
+  p.putString("objIco", S.objIcon);
   p.putString("staSsid", S.staSsid);
   p.putString("staPass", S.staPass);
   p.putString("staBssid", S.staBssid);
