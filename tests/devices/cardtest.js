@@ -38,3 +38,6 @@ d.watch.grid = { st: 1, exact: true, ago: 60, at: '12:54' };
 d.watch.bcn.list[0] = Object.assign({}, d.watch.bcn.list[0], { seen: true, alive: true, ago: 1, rssi: -58, ver: '1.0.17' });
 d.watch.bcn.list.push({ mac: '80:65:99:11:22:33', cfg: false, seen: true, alive: true, ago: 1, rssi: -55, ver: '1.0.17' });
 out('card_all', d);
+const u = base(); u.watch.avr = { assigned: false, mac: '' };
+u.net.clients.push({ mac: 'c4:5b:be:00:00:01', ip: '10.77.0.11', assoc: true, rssi: -51, ping: null, seen: 0 });
+out('card_noavr', u);

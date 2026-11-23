@@ -349,11 +349,12 @@ function renderDev(d){
  for(const b of BL)if(!b.cfg)BU[b.mac]=b;
  const ms=[...new Set(cl.map(x=>x.mac).concat(Object.keys(BU)))].filter(m=>m&&!bound.has(m));
  ms.sort((a,b)=>((C[b]&&C[b].assoc)?1:0)-((C[a]&&C[a].assoc)?1:0));
- let o='',unk=0;
+ let o='',unk=0,oth=0;
  for(const m of ms){const x=C[m],b=BU[m];let what,act='';
   if(b){what='<b>маячок</b>'+sm('шле Сторожу «я тут», але його немає в списку');act='<button data-act="bcnpick" data-mac="'+m+'">Додати маячок</button>'}
   else if(isY(x))what='<b>цей пристрій</b>'+sm('з нього відкрито сторінку');
   else if(isR(m))what='<b>телефон чи комп\'ютер</b>';
+  else if(w.avr.assigned){what='<b>інший пристрій</b>'+sm('не маячок і не міст батареї');act='<button data-act="assign" data-mac="'+m+'" data-old="'+esc(avr)+'">Це новий АВР</button>';oth++}
   else{what='<b>невідомий</b>'+sm('може бути АВР');act='<button data-act="assign" data-mac="'+m+'">Це АВР</button>';if(x&&x.assoc)unk++}
   const st=x&&x.assoc?ok('у мережі')+sm(sg(x)):b&&b.alive?ok('на зв\'язку')+sm('вістка '+ago(b.ago)+' тому'):gr('від\'єднався')+sm((x?ago(x.seen):b?ago(b.ago):'—')+' тому');
   o+='<tr><td>'+what+ad(m,x)+(act?'<div style="margin-top:4px">'+act+'</div>':'')+'</td><td>'+st+'</td></tr>'}
@@ -361,7 +362,8 @@ function renderDev(d){
  const aY=w.avr.assigned&&isY(C[avr]);
  $('clhint').textContent=aY?'АВР-ом зараз призначено пристрій, з якого відкрито цю сторінку. Справжній АВР з\'явиться окремим рядком, коли його підключать у застосунку eWeLink до точки «'+n.ap.ssid+'».':
   !w.avr.assigned&&unk===1?'У мережі Сторожа один невідомий пристрій. Якщо АВР щойно підключали в eWeLink, це він: натисніть «Це АВР».':
-  (!w.avr.assigned&&!unk?'Підключіть АВР у застосунку eWeLink до точки «'+n.ap.ssid+'».':'');
+  (!w.avr.assigned&&!unk?'Підключіть АВР у застосунку eWeLink до точки «'+n.ap.ssid+'».':
+  oth?'АВР уже прив\'язано ('+avr+'). «Це новий АВР» — лише якщо АВР замінили: тоді Сторож стежитиме за новим, а не за старим.':'');
 }
 function render(d){
  const w=d.watch,g=w.grid.st,l=w.line.st,le=w.line.enabled;
@@ -690,7 +692,7 @@ document.addEventListener('click',async e=>{
  else if(a==='reboot'){if(!confirm('Перезапустити Сторожа? АВР на кілька секунд втратить Wi-Fi.'))return;try{await j('/api/reboot',{method:'POST'})}catch(err){}note('smsg','Перезапуск…')}
  else if(a==='bcnpick'){const m=b.dataset.mac,nb=document.querySelector('nav button[data-t="set"]');if(nb)nb.click();
   setTimeout(()=>{$('b_mac').value=m;$('bcncard').scrollIntoView({behavior:'smooth'});$('b_name').focus()},300)}
- else if(a==='assign'){if(!confirm('Вважати пристрій '+b.dataset.mac+' АВР-ом?'))return;try{await j('/api/assign',{method:'POST',body:new URLSearchParams({mac:b.dataset.mac})});refresh();if(tab==='set')loadSet()}catch(err){alert(err.message)}}
+ else if(a==='assign'){if(!confirm(b.dataset.old?'Вважати АВР-ом пристрій '+b.dataset.mac+' замість '+b.dataset.old+'? Сторож стежитиме за новим.':'Вважати пристрій '+b.dataset.mac+' АВР-ом?'))return;try{await j('/api/assign',{method:'POST',body:new URLSearchParams({mac:b.dataset.mac})});refresh();if(tab==='set')loadSet()}catch(err){alert(err.message)}}
  else if(a==='logout'){try{await j('/logout',{method:'POST'})}catch(err){}location.reload()}
  else if(a==='add'){try{await j('/api/addchat',{method:'POST',body:new URLSearchParams({id:b.dataset.id,name:b.dataset.name})});note('rmsg','Додано.');loadTg();refresh()}catch(err){note('rmsg',err.message,1)}}
 });

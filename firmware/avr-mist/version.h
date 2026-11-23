@@ -1,4 +1,4 @@
 /* Створює tools/build.sh під час збирання — вручну не правити. */
 #pragma once
-#define FW_VERSION "1.0.44"
-#define FW_BUILD   "23.11.2026 13:00"
+#define FW_VERSION "1.0.45"
+#define FW_BUILD   "23.11.2026 13:26"
