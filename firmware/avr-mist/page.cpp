@@ -47,7 +47,7 @@ label{display:block;margin:10px 0 4px;font-size:13px;color:var(--mut)}label.ck{d
 input,textarea,select{width:100%;padding:9px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
 input[type=checkbox]{width:auto;margin-top:3px}textarea{min-height:76px}
 button{padding:9px 14px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--fg);font:inherit;cursor:pointer}
-button.p{background:var(--acc);color:#fff;border-color:var(--acc)}button.d{background:#b3261e;color:#fff;border-color:#b3261e}nav button.sel{background:var(--acc);color:#fff;border-color:var(--acc)}
+button.p{background:var(--acc);color:#fff;border-color:var(--acc)}button.d{background:#b3261e;color:#fff;border-color:#b3261e}.card button:not(.p):not(.d){background:var(--bg);border-color:var(--mut)}a.btn{display:inline-block;padding:9px 14px;border:1px solid var(--acc);border-radius:8px;background:var(--acc);color:#fff;text-decoration:none;font:inherit}nav button.sel{background:var(--acc);color:#fff;border-color:var(--acc)}
 .tbl{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}td{padding:6px 4px;border-bottom:1px solid var(--bd);vertical-align:top}
 .hide{display:none}.msg{padding:9px 11px;border-radius:8px;margin:10px 0 0;background:var(--bg)}.err{color:var(--bad)}
 .flex{display:flex;gap:6px;flex-wrap:wrap}.flex input{flex:1}.col{display:inline-flex;align-items:center;gap:6px;margin:6px 10px 0 0;font-size:13px;color:var(--mut)}.col input{width:42px;height:30px;padding:0;border:1px solid var(--bd);border-radius:6px;background:none}input[type=range]{width:100%;padding:0}
@@ -113,8 +113,8 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
     <li>Відкрийте Telegram на телефоні чи комп'ютері.</li>
     <li>У пошуку Telegram введіть <b>@BotFather</b> і відкрийте його. Це офіційний бот Telegram, біля імені синя галочка. Натисніть «Почати» (Start).</li>
     <li>Надішліть йому повідомлення <b>/newbot</b>.</li>
-    <li>BotFather попросить <b>назву</b> бота: так його бачитимуть у списку чатів. Напишіть, наприклад, <i>Світло церкви</i>.</li>
-    <li>Далі він попросить <b>ім'я користувача</b>: латиницею, без пробілів, у кінці обов'язково <i>bot</i>. Наприклад, <i>svitlo_cerkvy_bot</i>. Якщо ім'я зайняте, він попросить інше: додайте цифри чи назву міста.</li>
+    <li>BotFather попросить <b>назву</b> бота: так його бачитимуть у списку чатів. Напишіть, наприклад, <i>Світло офісу</i>.</li>
+    <li>Далі він попросить <b>ім'я користувача</b>: латиницею, без пробілів, у кінці обов'язково <i>bot</i>. Наприклад, <i>svitlo_ofisu_bot</i>. Якщо ім'я зайняте, він попросить інше: додайте цифри чи назву міста.</li>
     <li>У відповіді «Done! Congratulations on your new bot» буде <b>токен</b>: рядок вигляду <i>1234567890:AAH…</i> після слів «Use this token to access the HTTP API». Натисніть на нього, і Telegram його скопіює.</li>
     <li>Вставте токен у поле нижче й натисніть <b>«Зберегти»</b>. За кілька секунд біля заголовка «Бот Telegram» з'явиться «підключено: @ім'я_бота».</li>
     <li>Тепер додайте людей: блок «Додати людину чи групу». Себе теж: відкрийте свого бота й натисніть «Почати».</li>
@@ -123,7 +123,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
   </details>
   <label>Токен бота від @BotFather</label><div class="flex"><input id="f_tgToken" placeholder="вставте токен сюди" autocomplete="off"><button data-act="savetok">Зберегти</button></div>
   <div id="boterr" class="err" style="margin-top:6px"></div>
-  <label>Назва бота в Telegram</label><div class="flex"><input id="f_botname" maxlength="64" placeholder="наприклад, Світло церкви"><button data-act="botname">Змінити</button></div>
+  <label>Назва бота в Telegram</label><div class="flex"><input id="f_botname" maxlength="64" placeholder="наприклад, Світло офісу"><button data-act="botname">Змінити</button></div>
   <div id="bnst" class="mut" style="margin-top:4px"></div>
   <div style="margin-top:10px"><button data-act="test">Надіслати пробне повідомлення всім</button></div><div id="tmsg"></div></div>
  <div class="card" id="phcard"><b>Картинка бота</b> <span class="mut">так її бачать у Telegram</span>
@@ -286,7 +286,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
  <div class="card"><b>Скидання</b>
   <div class="mut" style="margin-top:6px">«Скинути налаштування» повертає типові: назву об'єкта, затримки, маячок, повідомлення про запуск, щоденний підсумок, сигнали (світлодіоди, стрічка, звук) і вивід кнопки скидання пароля. Wi-Fi роутера, мережа для АВР, сам АВР, бот з одержувачами й пароль сторінки лишаються — Сторож працює далі без перезапуску.</div>
   <div><button data-act="rprefs">Скинути налаштування</button></div>
-  <div class="mut" style="margin-top:14px">«Скинути все» — як нова плата, те саме, що BOOT 10 секунд: Сторож забуде Wi-Fi церкви, мережу для АВР, АВР, бота й одержувачів, пароль сторінки, свої звуки. Перед тим одержувачам прийде «Сторожа скинуто до заводських налаштувань». За 10 секунд він перезапуститься й роздаватиме мережу «<b id="r_ap"></b>» з типовим паролем <b id="r_pw"></b>; сторінка — http://10.77.0.1, вхід admin з тим самим паролем. АВР доведеться підключити заново в eWeLink (інструкція, розділ 3). Статистика світла лишиться.</div>
+  <div class="mut" style="margin-top:14px">«Скинути все» — як нова плата, те саме, що BOOT 10 секунд: Сторож забуде Wi-Fi роутера, мережу для АВР, АВР, бота й одержувачів, пароль сторінки, свої звуки. Перед тим одержувачам прийде «Сторожа скинуто до заводських налаштувань». За 10 секунд він перезапуститься й роздаватиме мережу «<b id="r_ap"></b>» з типовим паролем <b id="r_pw"></b>; сторінка — http://10.77.0.1, вхід admin з тим самим паролем. АВР доведеться підключити заново в eWeLink (інструкція, розділ 3). Статистика світла лишиться.</div>
   <label>Щоб скинути все, введіть слово СКИНУТИ</label><div class="flex"><input id="r_word" autocomplete="off" maxlength="20"><button class="d" data-act="rall">Скинути все</button></div>
   <div id="rmsg2"></div>
  </div>
@@ -351,11 +351,11 @@ function renderDev(d){
  ms.sort((a,b)=>((C[b]&&C[b].assoc)?1:0)-((C[a]&&C[a].assoc)?1:0));
  let o='',unk=0,oth=0;
  for(const m of ms){const x=C[m],b=BU[m];let what,act='';
-  if(b){what='<b>маячок</b>'+sm('шле Сторожу «я тут», але його немає в списку');act='<button data-act="bcnpick" data-mac="'+m+'">Додати маячок</button>'}
+  if(b){what='<b>маячок</b>'+sm('шле Сторожу «я тут», але його немає в списку');act='<button class="p" data-act="bcnpick" data-mac="'+m+'">Додати маячок</button>'}
   else if(isY(x))what='<b>цей пристрій</b>'+sm('з нього відкрито сторінку');
   else if(isR(m))what='<b>телефон чи комп\'ютер</b>';
   else if(w.avr.assigned){what='<b>інший пристрій</b>'+sm('не маячок і не міст батареї');act='<button data-act="assign" data-mac="'+m+'" data-old="'+esc(avr)+'">Це новий АВР</button>';oth++}
-  else{what='<b>невідомий</b>'+sm('може бути АВР');act='<button data-act="assign" data-mac="'+m+'">Це АВР</button>';if(x&&x.assoc)unk++}
+  else{what='<b>невідомий</b>'+sm('може бути АВР');act='<button class="p" data-act="assign" data-mac="'+m+'">Це АВР</button>';if(x&&x.assoc)unk++}
   const st=x&&x.assoc?ok('у мережі')+sm(sg(x)):b&&b.alive?ok('на зв\'язку')+sm('вістка '+ago(b.ago)+' тому'):gr('від\'єднався')+sm((x?ago(x.seen):b?ago(b.ago):'—')+' тому');
   o+='<tr><td>'+what+ad(m,x)+(act?'<div style="margin-top:4px">'+act+'</div>':'')+'</td><td>'+st+'</td></tr>'}
  $('cl').innerHTML=o||'<tr><td class="mut">Інших пристроїв у мережі Сторожа немає.</td></tr>';
@@ -448,7 +448,7 @@ function renderBat(b){const c=$('batcard');if(!b){c.classList.add('hide');return
  }else h+='<div><b class="err">'+(!b.seen?'Міст батареї від запуску Сторожа не озивався':!b.bridge?'Міст батареї не на зв\'язку '+ago(b.ago):(b.soc!=null?'Даних від BMS немає '+ago(b.age)+' — ':'Даних від BMS ще немає — ')+ST[b.st||0])+'</b></div>';
  //  сторінка мосту через Сторожа працює з версії мосту 1.1.0 (старіша питає свої адреси не через /bms/)
  const bv=(b.ver||'0').split('.').map(Number),bNew=bv[0]>1||(bv[0]===1&&bv[1]>=1);
- if(b.seen&&b.bridge)h+=bNew?'<div style="margin-top:8px"><a href="/bms/" target="_blank" rel="noopener"><button type="button">Сторінка мосту батареї</button></a> <span class="mut">дисплей мосту, яку BMS слухати, оновлення мосту'+(b.lcd?' · дисплей увімкнено':'')+'</span></div>'
+ if(b.seen&&b.bridge)h+=bNew?'<div style="margin-top:8px"><a class="btn" href="/bms/" target="_blank" rel="noopener">Сторінка мосту батареї</a> <span class="mut">дисплей мосту, яку BMS слухати, оновлення мосту'+(b.lcd?' · дисплей увімкнено':'')+'</span></div>'
   :'<div class="mut" style="margin-top:8px">Сторінка мосту (дисплей, оновлення по мережі) відкриватиметься звідси з версії мосту 1.1.0 — зараз '+esc(b.ver)+': її ставлять кабелем USB.</div>';
  if(b.seen)h+='<div class="mut" style="margin-top:6px">Міст '+esc(b.mac)+', версія '+esc(b.ver)+(b.up?', працює '+ago(b.up):'')+', Wi-Fi '+b.rssi+' дБм'+(b.name?' · BMS '+esc(b.name)+(b.model&&b.model!==b.name?' ('+esc(b.model)+')':'')+(b.sw?', прошивка '+esc(b.sw):'')+', '+b.brssi+' дБм':'')+' · з\'єднань із BMS '+b.rc+'</div>';
  $('batbody').innerHTML=h;$('batsub').textContent=b.ok?'дані '+ago(b.age)+' тому':'';

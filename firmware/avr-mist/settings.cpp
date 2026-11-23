@@ -23,7 +23,7 @@ void settingsLoad() {
   auto gs = [&](const char* k, const String& d) { return ok ? p.getString(k, d) : d; };
   auto gu = [&](const char* k, uint16_t d) { return ok ? p.getUShort(k, d) : d; };
   auto gb = [&](const char* k, bool d) { return ok ? p.getBool(k, d) : d; };
-  S.objName     = gs("obj", "Церква");
+  S.objName     = gs("obj", "Об'єкт");          // 1.0.46: типова — без «Церкви»; збережена лишається
   S.staSsid     = gs("staSsid", "");
   S.staPass     = gs("staPass", "");
   S.staBssid    = gs("staBssid", "");

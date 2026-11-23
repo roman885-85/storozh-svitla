@@ -653,7 +653,7 @@ static bool num(const char* k, uint16_t& dst, int lo, int hi, const char* what) 
 static void hSettingsPost() {
   if (!auth()) return;
   Settings n = S;
-  if (srv.hasArg("obj")) { n.objName = srv.arg("obj"); n.objName.trim(); if (!n.objName.length()) n.objName = "Церква"; if (n.objName.length() > 80) return fail("Назва задовга"); }
+  if (srv.hasArg("obj")) { n.objName = srv.arg("obj"); n.objName.trim(); if (!n.objName.length()) n.objName = "Об'єкт"; if (n.objName.length() > 80) return fail("Назва задовга"); }
   if (srv.hasArg("staSsid")) { n.staSsid = srv.arg("staSsid"); n.staSsid.replace("\r", ""); n.staSsid.replace("\n", ""); if (n.staSsid.length() > 32) return fail("Назва мережі роутера — до 32 байтів"); }
   if (srv.hasArg("staBssid")) {
     String m = srv.arg("staBssid");

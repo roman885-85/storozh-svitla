@@ -916,7 +916,7 @@ static void poll(const String& token) {
 //  Меню команд і опис бота (1.0.6, «оформи красиво»): ставимо лише те, що в боті ще порожнє, — свої зміни
 //  власник може робити в @BotFather, міст їх не затирає. Раз на запуск, після getMe.
 static void botProfile(const String& token) {
-  String r, o = S.objName.length() ? S.objName : String("Церква");
+  String r, o = S.objName.length() ? S.objName : String("Об'єкт");
   //  Меню команд: порожнє або без /notify (до 1.0.21) — ставимо повне.
   if (call(token, "getMyCommands", "{}", r) == 200 && r.indexOf("\"notify\"") < 0)
     call(token, "setMyCommands", "{\"commands\":[{\"command\":\"status\",\"description\":\"📊 Стан світла зараз\"},"
