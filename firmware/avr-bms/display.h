@@ -148,7 +148,7 @@ static void lcdView(BatView& v, uint32_t now) {
   }
   v.alarm = lcdAlarm;
   v.alarmPage = (int)(now / 3000);                 // сторінка тексту тривоги — кожні 3 с
-  v.ageMin = at ? (int)((now - at) / 60000) : 0;
+  v.ageMin = at ? (int)(agoMs(cellsAtMs) / 60000) : 0;   // 1.1.1: не «now − мітка» (див. agoMs)
   v.rBms = bst == 2 || bst == 3 ? batLevel((int)curRssi, true) : -1;
   v.rWifi = WiFi.isConnected() ? batLevel(WiFi.RSSI(), false) : -1;
   v.setup = setupOn;

@@ -72,6 +72,17 @@ static volatile uint8_t bst = 0;         // 0 шукаю BMS, 1 під'єдну�
 static char curMac[18] = "", curName[24] = "";
 static volatile int curRssi = 0;
 static volatile uint32_t reconnects = 0, connSinceMs = 0, waitUntilMs = 0, bleBeat = 0, badFmt = 0, cmds = 0;
+
+//  1.1.1: «скільки мс тому» для мітки, яку пише ІНША задача (задача Bluetooth, зворотний виклик кадрів BMS). Мітку
+//  читаємо ДО millis(), а різницю беремо зі знаком. До 1.1.1 час брали раніше (now на початку циклу), і якщо мітку
+//  записали вже після, now − мітка без знака давала ~4,29·10⁹ мс. 23.11.2026 так міст тричі за 5 хв «бачив», що задача
+//  Bluetooth завмерла, і перезапускався через хвилину роботи, а задача Bluetooth — що «BMS замовкла на хвилину», і рвала
+//  з'єднання (BMS щоразу пищить). Та сама пастка, що в годиннику-інформері й моніторі сцени.
+static inline uint32_t agoMs(volatile uint32_t& stamp) {
+  uint32_t at = stamp;
+  int32_t d = (int32_t)(millis() - at);
+  return d > 0 ? (uint32_t)d : 0;
+}
 static char noteBuf[192] = "";          // що сталося з останньою спробою (для сторінки й info)
 static char pinBuf[18] = "";            // яку BMS слухати: MAC малими; "" — найближчу JK
 static jk::Assembler as;
@@ -267,7 +278,7 @@ static void bleTask(void*) {
           }
           bst = 3;
         } else {
-          uint32_t age = now - cellsAtMs;
+          uint32_t age = agoMs(cellsAtMs);       // 1.1.1: не «now − мітка»: кадр міг прийти вже після now
           bst = age < 15000 ? 2 : 3;
           if (age > 60000) { setNote("BMS замовкла на хвилину — перепід'єднуюсь"); break; }
         }
@@ -329,7 +340,7 @@ static void beat(uint32_t now) {
   uint32_t at = cellsAtMs;
   if (at && c.fmt) {
     addKV(b, sizeof b, " age=%lu fmt=%u soc=%u v=%lu i=%ld rem=%lu full=%lu cyc=%lu soh=%u n=%u lo=%u lox=%u hi=%u hix=%u",
-          (unsigned long)((now - at) / 1000), c.fmt, c.soc, (unsigned long)c.totalMv, (long)c.ma, (unsigned long)c.remMah,
+          (unsigned long)(agoMs(cellsAtMs) / 1000), c.fmt, c.soc, (unsigned long)c.totalMv, (long)c.ma, (unsigned long)c.remMah,
           (unsigned long)c.fullMah, (unsigned long)c.cycles, c.soh, c.n, c.vmin, c.imin, c.vmax, c.imax);
     if (c.hasT1) addKV(b, sizeof b, " t1=%d", c.t1);
     if (c.hasT2) addKV(b, sizeof b, " t2=%d", c.t2);
@@ -706,7 +717,7 @@ void loop() {
   if (otaUrl.length()) otaRun();
   //  Нова прошивка (після оновлення по мережі) — справна, якщо хвилину працює й задача Bluetooth жива
   static bool valid = false;
-  if (!valid && now - bootMs > 60000 && now - bleBeat < 30000) { valid = true; esp_ota_mark_app_valid_cancel_rollback(); }
+  if (!valid && now - bootMs > 60000 && agoMs(bleBeat) < 30000) { valid = true; esp_ota_mark_app_valid_cancel_rollback(); }
   bool conn = WiFi.isConnected();
   if (conn) { if (!linkSince) linkSince = now | 1; } else linkSince = 0;
   //  Годинник — для нічної підсвітки дисплея: з інтернету через Сторожа; немає інтернету — ночі немає
@@ -729,6 +740,10 @@ void loop() {
     if (!phone && ((now - lastLink > 15UL * 60 * 1000 && bst != 2) || now - lastLink > 60UL * 60 * 1000)) ESP.restart();
   }
   //  Задача Bluetooth завмерла (жодного кроку 3 хв: пошук — 5 с, під'єднання — до 30 с) — почати з чистого аркуша
-  if (now - bootMs > 60000 && now - bleBeat > 180000) { Serial.println("Задача Bluetooth завмерла — перезапуск"); delay(100); ESP.restart(); }
+  //  1.1.1: мітка — до millis(), різниця зі знаком, і перезапуск лише коли так двічі поспіль (як у годиннику)
+  static uint8_t stuck = 0;
+  if (now - bootMs > 60000 && agoMs(bleBeat) > 180000) {
+    if (++stuck >= 2) { Serial.println("Задача Bluetooth завмерла — перезапуск"); delay(100); ESP.restart(); }
+  } else stuck = 0;
   delay(10);
 }
