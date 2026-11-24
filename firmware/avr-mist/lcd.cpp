@@ -235,7 +235,7 @@ void lcdAlert(int kind, const String& text, int sec) {
 static void build(LcdView& v) {
   int64_t now = nowUs();
   v = LcdView();
-  bool avr = watchAvrSet();
+  bool avr = watchCitySet();                       // 1.0.57: АВР чи маячок «Міське світло»
   int g = watchGrid();
   v.grid = !avr ? -2 : g;
   v.gen = watchLine();

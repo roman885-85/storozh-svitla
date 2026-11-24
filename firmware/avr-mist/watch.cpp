@@ -52,6 +52,11 @@ static bool avrAssigned() { uint8_t m[6]; return strToMac(S.avrMac, m); }
 //  маячок на столі (від USB комп'ютера) не повинен казати «генератор працює».
 static bool legacy() { return nbc == 0 && S.mayakOn; }
 static bool hasRole(char r) { for (int i = 0; i < nbc; i++) if (bc[i].role == r) return true; return false; }
+//  1.0.57 (власник 24.11.2026: «вместо TOMZN/eWeLink можно использовать маячок тоже»): маячок з роллю «Міське світло»
+//  ('c') — у розетці лише від міста: на зв'язку — місто є, мовчить — немає. Замість АВР чи разом з ним (тоді місто є,
+//  поки на зв'язку хоч один — і хибного «Зникло», коли зависає Wi-Fi АВР, немає).
+static bool citySet() { return avrAssigned() || hasRole('c'); }
+static String gridSrc;                             // хто зараз свідчить про місто — для журналу
 static bool lineEnabled() { return legacy() || hasRole('g'); }
 static BSeen* seenFor(const uint8_t* m) { for (auto& b : bs) if (b.used && !memcmp(b.mac, m, 6)) return &b; return nullptr; }
 static bool aliveB(const BSeen* b, int64_t now) { return b && now - b->lastUs < BEAT_FRESH; }
@@ -77,7 +82,7 @@ static void parseBeacons() {
     BCfg& b = bc[nbc];
     b = BCfg();
     memcpy(b.mac, m, 6);
-    b.role = (l[18] == 'g' || l[18] == 'l') ? l[18] : 'v';
+    b.role = (l[18] == 'g' || l[18] == 'l' || l[18] == 'c') ? l[18] : 'v';
     b.name = l.length() > 20 ? l.substring(20) : String();
     b.name.trim();
     for (int k = 0; k < nold; k++) if (!memcmp(old[k].mac, m, 6) && old[k].role == b.role) b.t = old[k].t;
@@ -88,6 +93,30 @@ static void parseBeacons() {
 }
 void watchReload() { parseBeacons(); }
 static bool genOn() { return lineEnabled() && line.st == T_ON; }
+//  1.0.57 (власник 24.11.2026: «нужна функция только с маячками — на случай отсутствия нужного АВР, или если АВР без Wi-Fi,
+//  или вообще ручной трехпозиционный, чтобы оповещение приходило и для таких случаев о требовании переключиться»).
+//  S.swMode 1 — ручний перемикач «Місто — 0 — Генератор»: у повідомленнях — на що переключити. Положення перемикача видно
+//  за маячками «Лінія чи фаза» після нього: усі мовчать, хоч є від чого живити, — перемикач не там, нагадуємо.
+static bool manualSw() { return S.swMode == 1; }
+static bool loadKnown() { return hasRole('l'); }
+static bool loadOn() { for (int i = 0; i < nbc; i++) if (bc[i].role == 'l' && bc[i].t.st == T_ON) return true; return false; }
+static bool loadOff() {                            // усі лінії точно без напруги (не «визначається»)
+  if (!loadKnown()) return false;
+  for (int i = 0; i < nbc; i++) if (bc[i].role == 'l' && bc[i].t.st != T_OFF) return false;
+  return true;
+}
+//  Куди має стояти перемикач, щоб лінії мали живлення: 'c' — на «Місто» (місто є, генератор не працює), 'g' — на «Генератор»
+//  (міста немає, генератор працює), 0 — байдуже (немає від чого живити, стан невідомий, чи працюють обидва: тоді нагадує
+//  «вимкніть генератор»).
+static char swWant() {
+  if (grid.st == T_ON && !genOn()) return 'c';
+  if (grid.st == T_OFF && genOn()) return 'g';
+  return 0;
+}
+static int64_t swBadSince = 0, swLastRem = 0;
+static const int64_t SW_FIRST = 120LL * 1000000;   // перше нагадування — за 2 хв: встигнути переключити самим
+static int swRems = 0;
+static char swBadFor = 0;
 static void bothStart() { bothSince = lastRemindUs = nowUs(); reminds = 0; }
 
 void watchBegin() {
@@ -169,9 +198,10 @@ static String head(const char* icon, const char* title, const String& when) {
   return String(icon) + " <b>" + title + "</b>\n" + objIco() + htmlEsc(obj()) + (when.length() ? " · " + when : String());
 }
 static String statusIconText() {
-  if (!avrAssigned()) return "⚪ " + statusShort();
+  if (!citySet()) return "⚪ " + statusShort();
   if (grid.st == T_UNK) return "⏳ " + statusShort();
   if (grid.st == T_ON && genOn()) return "⚠️ " + statusShort();
+  if (manualSw() && swWant() && loadOff()) return "⚠️ " + statusShort();   // 1.0.57: перемикач не там
   return String(grid.st == T_ON ? "🟢 " : "🔴 ") + statusShort();
 }
 String testMessage() { return head("✅", "Перевірка зв'язку", "%T") + "\nЗараз: " + statusIconText(); }
@@ -195,7 +225,7 @@ static uint32_t rwSum(const RtcWatchData& d) {         // FNV-1a — без ROM-
 //  Записати поточний стан. Поки щось ще визначається після запуску — ні: інакше «невідомо» затерло б те, що ще не відновили.
 static void rwSave() {
   if (!clockValid()) return;
-  if (avrAssigned() && grid.st == T_UNK) return;
+  if (citySet() && grid.st == T_UNK) return;
   if (lineEnabled() && line.st == T_UNK) return;
   int64_t ep = (int64_t)time(nullptr), now = nowUs();
   RtcWatchData d;
@@ -242,14 +272,14 @@ static bool rwRestore(Track& t, Change& c, int8_t st, uint8_t ex, int64_t since,
 //  «Зникло» з повідомленням; так само «немає» → «Повернулось», щойно АВР на зв'язку.
 static void rwBootRestore() {
   if (!rwUsable()) return;
-  if (avrAssigned() && grid.st == T_UNK && (RW.d.gst == T_ON || RW.d.gst == T_OFF)) {
+  if (citySet() && grid.st == T_UNK && (RW.d.gst == T_ON || RW.d.gst == T_OFF)) {
     grid.st = (Tri)RW.d.gst;
     grid.since = usOfEpoch(RW.d.gsince);
     grid.exact = RW.d.gex;
     rwGridTried = rwGridSame = true;
     gridChecked = false;
     logEvent(String("Місто: «") + (grid.st == T_ON ? "є" : "немає") + "» " + (grid.exact ? "з " : "щонайменше з ") + fmtHM(grid.since) +
-             " — пам'ятав до перезапуску, звіряю з АВР");
+             " — пам'ятав до перезапуску, звіряю з АВР чи маячком міста");
   }
   if (lineEnabled() && line.st == T_UNK && (RW.d.lst == T_ON || RW.d.lst == T_OFF)) {
     line.st = (Tri)RW.d.lst;
@@ -265,7 +295,7 @@ static void rwBootRestore() {
 static void onGrid(const Change& c, bool restored = false) {
   if (!restored) statsTransition(c.from, grid.st, grid.since, !grid.exact);   // відновлено — відключення те саме, не нове
   sigEvent(c.from, grid.st);
-  logEvent(grid.st == T_ON ? "Місто: є (АВР на зв'язку)" : "Місто: немає (АВР зник із мережі)");
+  logEvent(String(grid.st == T_ON ? "Місто: є (" : "Місто: немає (") + gridSrc + ")");
   if (restored) logEvent(String("Місто: «") + (grid.st == T_ON ? "є" : "немає") + "» " + (grid.exact ? "з " : "щонайменше з ") + fmtHM(grid.since) + " — пам'ятав до перезапуску");
   if (c.from == T_UNK) return;                   // перше визначення після запуску — скаже повідомлення про запуск
   lcdAlert(grid.st == T_ON ? LCD_A_BACK : LCD_A_LOST);   // 1.0.26: спалахи й миготіння на дисплеї
@@ -273,11 +303,13 @@ static void onGrid(const Change& c, bool restored = false) {
     String m = head("🔴", "Зникло міське світло", "%T") + "\n⏱ Світло було " + durSince(c, grid.since);
     if (genOn()) m += "\n🟡 Генератор працює";
     else if (lineEnabled() && line.st == T_OFF) m += "\n⚫ Генератор не працює";
+    if (manualSw()) m += genOn() ? "\n🔁 <b>Переключіть перемикач на «Генератор»</b>" : "\n🔁 <b>Запустіть генератор і переключіть перемикач на «Генератор»</b>";
     m += schLostNote();                          // 1.0.20: за графіком YASNO чи ні
     tgBroadcast(grid.since, m, false, RF_LIGHT);
   } else {
     String m = head("🟢", "Міське світло повернулось", "%T") + "\n⏱ Не було " + durSince(c, grid.since);
-    if (genOn()) { m += "\n⚠️ <b>Генератор ще працює — вимкніть його</b>"; bothStart(); }
+    if (genOn()) { m += manualSw() ? "\n⚠️ <b>Переключіть перемикач на «Місто» і вимкніть генератор</b>" : "\n⚠️ <b>Генератор ще працює — вимкніть його</b>"; bothStart(); }
+    else if (manualSw() && !loadKnown()) m += "\n🔁 <b>Переключіть перемикач на «Місто»</b>, якщо він ще на «Генератор» чи «0»";   // з маячком лінії — нагадає checkSwitch, лише коли треба
     m += schBackNote();                          // 1.0.20: наступне відключення за графіком
     tgBroadcast(grid.since, m, false, genOn() ? (RF_LIGHT | RF_GEN) : RF_LIGHT);
   }
@@ -291,16 +323,18 @@ static void onLine(const Change& c, bool restored = false) {
   if (line.st == T_ON) {
     if (grid.st == T_OFF)
       tgBroadcast(line.since, head("🟡", "Працює генератор", "%T") + "\n🔴 Міського світла немає " +
-                              (grid.exact ? "з " + fmtHM(grid.since) : "щонайменше " + fmtDur((nowUs() - grid.since) / 1000000)), false, RF_GEN);
+                              (grid.exact ? "з " + fmtHM(grid.since) : "щонайменше " + fmtDur((nowUs() - grid.since) / 1000000)) +
+                              (manualSw() && !loadOn() ? "\n🔁 <b>Переключіть перемикач на «Генератор»</b>, якщо ще не переключили" : ""), false, RF_GEN);
     else if (grid.st == T_ON) {
-      tgBroadcast(line.since, head("⚠️", "Генератор працює, а міське світло є", "%T") + "\nВимкніть генератор, якщо його не перевіряють.", false, RF_GEN);
+      tgBroadcast(line.since, head("⚠️", "Генератор працює, а міське світло є", "%T") + (manualSw() ? "\nЯкщо його не перевіряють — перемикач на «Місто», генератор вимкніть." : "\nВимкніть генератор, якщо його не перевіряють."), false, RF_GEN);
       bothStart();
     }
   } else {
     if (grid.st == T_OFF)
       tgBroadcast(line.since, head("⚫", "Генератор зупинився", "%T") + "\n⏱ Працював " + durSince(c, line.since) + "\n⚠️ Світла немає ні з міста, ні від генератора", false, RF_GEN | RF_LIGHT);
     else if (grid.st == T_ON)
-      tgBroadcast(line.since, head("✅", "Генератор вимкнено", "%T") + "\n⏱ Працював " + durSince(c, line.since) + "\n🟢 Міське світло є", false, RF_GEN);
+      tgBroadcast(line.since, head("✅", "Генератор вимкнено", "%T") + "\n⏱ Працював " + durSince(c, line.since) + "\n🟢 Міське світло є" +
+                              (manualSw() && !loadKnown() ? "\n🔁 <b>Переключіть перемикач на «Місто»</b>, якщо ще не переключили" : ""), false, RF_GEN);
   }
 }
 
@@ -326,7 +360,7 @@ static void flushLines(int64_t now) {
     any = true;
     const LChg& x = lpend[i];
     int64_t dt = grid.rawSince - x.at;
-    if (!avrAssigned() || grid.raw != x.on || dt > 90LL * 1000000 || dt < -90LL * 1000000) allGrid = false;
+    if (!citySet() || grid.raw != x.on || dt > 90LL * 1000000 || dt < -90LL * 1000000) allGrid = false;
     if (grid.st != (x.on ? T_ON : T_OFF)) gridSaid = false;
   }
   int64_t waitMax = ((int64_t)(S.offSec > S.onSec ? S.offSec : S.onSec) + 15) * 1000000;
@@ -350,7 +384,8 @@ static void flushLines(int64_t now) {
   if (!n) return;
   String m = head("🔌", n > 1 ? "Зміни на лініях" : lpend[first].on ? "Напруга на лінії є" : "Немає напруги на лінії", "%T") + body;
   if (allGrid) m += "\nРазом із міським світлом";
-  else if (genOn()) m += "\n🟡 Працює генератор";
+  else if (genOn()) m += manualSw() && grid.st == T_OFF && loadOn() ? "\n🟡 Живлення від генератора" : "\n🟡 Працює генератор";
+  else if (manualSw() && grid.st == T_ON && loadOn()) m += "\n🟢 Живлення від міста";
   tgBroadcast(ev, m, allGrid, RF_LINE);
 }
 
@@ -364,13 +399,34 @@ static void checkGenRemind(int64_t now) {
   lastRemindUs = now;
   reminds++;
   tgBroadcast(now, head("⚠️", "Генератор досі працює", "%T") + "\nМіське світло є " + (grid.exact ? "з " + fmtHM(grid.since) : "щонайменше " + fmtDur((now - grid.since) / 1000000)) +
-                   ", генератор працює " + fmtDur((now - line.since) / 1000000) + " — вимкніть його." +
+                   ", генератор працює " + fmtDur((now - line.since) / 1000000) + (manualSw() ? " — перемикач на «Місто», генератор вимкніть." : " — вимкніть його.") +
                    (reminds >= 6 ? "\nБільше не нагадую. Якщо генератор вимкнений, а повідомлення приходять — маячок не в розетці від генератора." : ""), false, RF_GEN);
+}
+
+//  1.0.57: ручний перемикач стоїть не там: є від чого живити, а всі маячки ліній після перемикача мовчать. Перше «🔁» — за
+//  2 хв такого стану, далі кожні S.genRemMin хв, разом до 6 (0 — лише перше). «Зникло міське світло» і «Працює генератор»
+//  кажуть «переключіть» одразу. Без маячків ліній положення невідоме: «переключіть, якщо ще не» — у повідомленнях про
+//  події; з ними про «Місто» мовчимо, доки лінія сама не покаже, що треба (зазвичай місто повертається й на лінію).
+static void checkSwitch(int64_t now) {
+  char w = manualSw() ? swWant() : 0;
+  if (!w || !loadOff()) { swBadFor = 0; return; }
+  if (w != swBadFor) { swBadFor = w; swBadSince = now; swRems = 0; return; }
+  if (!swRems) { if (now - swBadSince < SW_FIRST) return; }
+  else if (!S.genRemMin || swRems >= 6 || now - swLastRem < (int64_t)S.genRemMin * 60 * 1000000) return;
+  swLastRem = now;
+  swRems++;
+  String why = w == 'g' ? "🔴 Міського світла немає, 🟡 генератор працює " + fmtDur((now - line.since) / 1000000)
+                        : "🟢 Міське світло є " + (grid.exact ? "з " + fmtHM(grid.since) : "щонайменше " + fmtDur((now - grid.since) / 1000000));
+  int64_t loff = 0;                                // відколи на лініях немає напруги (остання замовкла)
+  for (int i = 0; i < nbc; i++) if (bc[i].role == 'l' && bc[i].t.since > loff) loff = bc[i].t.since;
+  tgBroadcast(now, head("🔁", w == 'g' ? "Переключіть перемикач на «Генератор»" : "Переключіть перемикач на «Місто»", "%T") + "\n" + why +
+                   ",\n🔌 а на лінії напруги немає " + fmtDur((now - loff) / 1000000) + "." +
+                   (swRems >= 6 ? "\nБільше не нагадую. Якщо перемикач на місці, а повідомлення приходять — маячок лінії не після перемикача." : ""), false, RF_GEN | RF_LINE);
 }
 
 static void announceStart(bool afterGrace) {
   if (startAnnounced) return;
-  bool gridKnown = !avrAssigned() || (grid.st != T_UNK && gridChecked);
+  bool gridKnown = !citySet() || (grid.st != T_UNK && gridChecked);
   bool lineKnown = !lineEnabled() || (line.st != T_UNK && lineChecked);
   if (!(gridKnown && lineKnown) && !afterGrace) return;
   startAnnounced = true;
@@ -393,12 +449,13 @@ void watchLoop() {
   Change c;
   if (!bootRestoreDone && (clockValid() || afterGrace)) { bootRestoreDone = true; rwBootRestore(); }
 
-  // --- АВР: місто ---
+  // --- місто: АВР і/або маячки «Міське світло» (1.0.57) ---
   uint8_t am[6];
-  if (strToMac(S.avrMac, am)) {
+  bool haveAvr = strToMac(S.avrMac, am);
+  if (haveAvr || hasRole('c')) {
     bool raw = false;
     ApDev cl;
-    bool found = findClient(am, cl);
+    bool found = haveAvr && findClient(am, cl);
     bool present = false;
     if (found && cl.assoc) {
       bool fresh = cl.lastPingOkUs && now - cl.lastPingOkUs < PING_FRESH;
@@ -410,7 +467,19 @@ void watchLoop() {
     //  світло є») прибрано: вони робили поведінку непередбачуваною. Тепер як у маячка: АВР у мережі Сторожа й відповідає —
     //  місто є; випав із мережі чи замовк — «міста немає» за S.offSec від останньої відповіді; знову в мережі S.onSec — «є».
     //  Запити пошуку мережі від АВР — лише рядок у журналі, на стан не впливають.
-    raw = present;
+    int64_t bLast = 0;                            // остання вістка від маячків міста
+    int bAlive = -1;
+    for (int i = 0; i < nbc; i++) {
+      if (bc[i].role != 'c') continue;
+      const BSeen* b = seenFor(bc[i].mac);
+      if (b && b->lastUs > bLast) bLast = b->lastUs;
+      if (aliveB(b, now)) bAlive = i;
+    }
+    raw = present || bAlive >= 0;
+    int64_t avrLast = found ? cl.lastPingOkUs : 0;
+    if (raw) gridSrc = present ? (bAlive >= 0 ? "АВР і маячок «" + bname(bAlive) + "» на зв'язку" : String("АВР на зв'язку"))
+                               : "маячок «" + bname(bAlive) + "» на зв'язку";
+    else gridSrc = haveAvr && hasRole('c') ? "АВР і маячок міста мовчать" : haveAvr ? "АВР зник із мережі" : "маячок міста мовчить";
     static bool probeSaid = false;
     if (!present && found && cl.lastProbeUs && cl.lastProbeUs > cl.lastPingOkUs + 1500000) {
       if (!probeSaid) {
@@ -420,7 +489,8 @@ void watchLoop() {
     } else if (present) probeSaid = false;
     //  1.0.29 (власник: «скорость сработки отсутствия света … не больше 15»): «АВР мовчить N с» — від останньої відповіді,
     //  а не від миті, коли мовчання помітили (раніше до S.offSec додавалось ще 8 с: 30 с → 38 с).
-    int64_t offUs = (int64_t)S.offSec * 1000000 - PING_FRESH;
+    //  1.0.57: маячок «живий» ще 7 с після вістки (АВР — 2,5 с після ping) — віднімаємо те, що в останнього свідка
+    int64_t offUs = (int64_t)S.offSec * 1000000 - (bLast > avrLast ? BEAT_FRESH : PING_FRESH);
     if (offUs < 1000000) offUs = 1000000;
     //  Точка Сторожа сама змінила канал (за роутером) — АВР шукає її на новому: 2 хв на це (дія Сторожа, не здогадка про АВР)
     int64_t chg = apChannelChangedUs();
@@ -431,24 +501,27 @@ void watchLoop() {
       //  так хибне спрацьовування видно й без моєї присутності.
       if (grid.st == T_OFF && c.from == T_ON) {
         String w;
-        if (!found) w = "АВР у точці не значиться";
+        if (!haveAvr) w = "";
+        else if (!found) w = "АВР у точці не значиться";
         else if (cl.assoc) w = "АВР у точці, але не відповідає на ping" + (cl.lastPingOkUs ? " " + String((long)((now - cl.lastPingOkUs) / 1000000)) + " с" : String());
         else w = "АВР вийшов із точки " + String((long)((now - cl.leaveUs) / 1000000)) + " с тому (код " + String(cl.leaveReason) +
                  (cl.leftAlive ? ", за мить до того відповідав" : "") + ")";
         if (found && cl.lastProbeUs) w += "; останній запит пошуку мережі від нього — " + String((long)((now - cl.lastProbeUs) / 1000000)) + " с тому";
-        logEvent("Чому «міста немає»: " + w + "; затримка " + String(S.offSec) + " с, сигнал АВР був " + String(found ? cl.rssi : 0) + " дБм");
+        if (haveAvr) w += ", сигнал АВР був " + String(found ? cl.rssi : 0) + " дБм";
+        if (hasRole('c')) w += String(w.length() ? "; " : "") + "маячок міста мовчить " + (bLast ? String((long)((now - bLast) / 1000000)) + " с" : String("від запуску"));
+        logEvent("Чому «міста немає»: " + w + "; затримка " + String(S.offSec) + " с");
       }
       if (grid.st == T_ON && c.from == T_OFF && grid.exact && c.fromExact) {
         long dur = (long)((grid.since - c.fromSince) / 1000000);
-        if (dur >= 0 && dur < 180)
+        if (dur >= 0 && dur < 180 && haveAvr && !hasRole('c'))
           logEvent("Коротке відключення — " + String(dur) + " с: АВР " +
                    (found && cl.assocUs && now - cl.assocUs < 120000000LL ? String("знову під'єднався до точки — виходив із мережі")
                                                                           : String("із точки не виходив — лише мовчав")) +
                    ". Якщо світло насправді не зникало, це обрив зв'язку з АВР.");
       }
       //  Момент зникнення — остання відповідь АВР (точність ~1 с), а не мить, коли помітили мовчання
-      if (grid.st == T_OFF && grid.exact && found && cl.lastPingOkUs && cl.lastPingOkUs < grid.since)
-        grid.since = cl.lastPingOkUs;                // момент — остання відповідь АВР
+      int64_t lastEv = avrLast > bLast ? avrLast : bLast;   // момент — остання вістка (АВР чи маячок міста)
+      if (grid.st == T_OFF && grid.exact && lastEv && lastEv < grid.since) grid.since = lastEv;
       bool rs = rwRestore(grid, c, RW.d.gst, RW.d.gex, RW.d.gsince, rwGridTried);
       if (rs) rwGridSame = true;
       if (!gridChecked) rwGridSame = false;      // відновлене не підтвердилось — за час перезапуску світло змінилось
@@ -487,13 +560,15 @@ void watchLoop() {
   flushLines(now);
 
   checkGenRemind(now);
+  checkSwitch(now);
   announceStart(afterGrace);
   static int64_t rwLast = 0;                         // раз на хвилину — «записано недавно» (≤ 10 хв) для перевірки після перезапуску
   if (now - rwLast > 60LL * 1000000) { rwLast = now; rwSave(); }
-  statsTick(avrAssigned() ? grid.st : -1);
+  statsTick(citySet() ? grid.st : -1);
 }
 
-int watchGrid() { return avrAssigned() ? (int)grid.st : -1; }
+int watchGrid() { return citySet() ? (int)grid.st : -1; }
+bool watchCitySet() { return citySet(); }
 bool watchAvrSet() { return avrAssigned(); }
 int64_t watchGridSince(bool& exact) { exact = grid.exact; return grid.since; }
 int64_t watchLineSince(bool& exact) { exact = line.exact; return line.since; }
@@ -527,7 +602,7 @@ bool watchBeaconEdit(const uint8_t* mac, char act, char role, const String& name
   if (act == 'd') {
     if (i < 0) { err = "Такого маячка немає в списку"; return false; }
   } else {
-    if (role != 'g' && role != 'l' && role != 'v') { err = "Невідома роль маячка"; return false; }
+    if (role != 'g' && role != 'l' && role != 'c' && role != 'v') { err = "Невідома роль маячка"; return false; }
     if (i < 0 && nbc >= MAXB) { err = "У списку вже " + String(MAXB) + " маячків — приберіть непотрібний"; return false; }
     if (strToMac(S.avrMac, am) && !memcmp(am, mac, 6)) { err = "Це адреса АВР, а не маячка"; return false; }
   }
@@ -552,7 +627,7 @@ String watchBeaconsText() {
   String r;
   auto one = [&](const uint8_t* mac, int ci) {
     const BSeen* b = seenFor(mac);
-    r += "\n• " + (ci >= 0 ? htmlEsc(bname(ci)) + " (" + (bc[ci].role == 'g' ? "генератор" : bc[ci].role == 'l' ? "лінія" : "показ") + ")"
+    r += "\n• " + (ci >= 0 ? htmlEsc(bname(ci)) + " (" + (bc[ci].role == 'g' ? "генератор" : bc[ci].role == 'l' ? "лінія" : bc[ci].role == 'c' ? "місто" : "показ") + ")"
                             : macToStr(mac) + " (немає в списку)") + ": ";
     if (aliveB(b, now)) {
       ApDev c;
@@ -569,13 +644,14 @@ String watchBeaconsText() {
 int watchLine() { return lineEnabled() ? (int)line.st : -1; }
 
 String statusShort() {
-  if (!avrAssigned()) return "АВР ще не призначено";
+  if (!citySet()) return "не задано, за чим стежити: АВР чи маячок «Міське світло»";
   switch (grid.st) {
     case T_UNK: return "стан визначається";
     case T_ON:
-      return genOn() ? "міське світло є, а генератор ще працює — вимкніть його" : "міське світло є";
+      if (genOn()) return manualSw() ? "міське світло є, а генератор ще працює — перемикач на місто, генератор вимкніть" : "міське світло є, а генератор ще працює — вимкніть його";
+      return manualSw() && loadOff() ? "міське світло є, а на лінії напруги немає — переключіть перемикач на місто" : "міське світло є";
     default:
-      if (lineEnabled() && line.st == T_ON) return "міського світла немає, працює генератор";
+      if (lineEnabled() && line.st == T_ON) return manualSw() && loadOff() ? "міського світла немає, генератор працює, а на лінії напруги немає — переключіть на генератор" : "міського світла немає, працює генератор";
       if (lineEnabled() && line.st == T_OFF) return "міського світла немає, генератор не працює";
       return "міського світла немає";
   }
@@ -590,11 +666,11 @@ static String sinceText(const Track& t) {
 String statusReport() {
   int64_t now = nowUs();
   String r = "📊 <b>Стан зараз</b>\n" + objIco() + htmlEsc(obj()) + " · " + fmtHM(now);
-  if (!avrAssigned()) r += "\n⚪ АВР ще не призначено";
+  if (!citySet()) r += "\n⚪ Не задано, за чим стежити: АВР чи маячок «Міське світло»";
   else if (grid.st == T_UNK) r += "\n⏳ Стан визначається";
   else r += String(grid.st == T_ON ? "\n🟢 Міське світло є · " : "\n🔴 Міського світла немає · ") + sinceText(grid);
   if (genOn())
-    r += String(grid.st == T_ON ? "\n⚠️ Генератор ще працює — вимкніть · " : "\n🟡 Працює генератор · ") + sinceText(line);
+    r += String(grid.st == T_ON ? (manualSw() ? "\n⚠️ Генератор ще працює — перемикач на «Місто», генератор вимкніть · " : "\n⚠️ Генератор ще працює — вимкніть · ") : "\n🟡 Працює генератор · ") + sinceText(line);
   else if (lineEnabled() && line.st == T_OFF && grid.st != T_ON)
     r += "\n⚫ Генератор не працює · " + sinceText(line);
   for (int i = 0; i < nbc; i++) {                // 1.0.23: маячки на лініях
@@ -602,6 +678,7 @@ String statusReport() {
     const Track& t = bc[i].t;
     r += "\n🔌 " + htmlEsc(bname(i)) + ": " + (t.st == T_ON ? "є напруга · " + sinceText(t) : t.st == T_OFF ? "немає напруги · " + sinceText(t) : String("визначається"));
   }
+  if (manualSw() && swWant() && loadOff()) r += swWant() == 'g' ? "\n🔁 <b>Переключіть перемикач на «Генератор»</b>" : "\n🔁 <b>Переключіть перемикач на «Місто»</b>";
   r += schStatusLine();                          // 1.0.20: графік YASNO
   r += bmsStatusLine();                          // 1.0.36: батарея
   r += "\n📡 Сторож працює " + fmtDur(now / 1000000) + (staUp() ? ", Wi-Fi " + String(staRssi()) + " дБм" : ", роутер не відповідає");
@@ -619,6 +696,7 @@ String watchJson() {
   String o = "{\"obj\":\"" + jsonEsc(obj()) + "\",\"status\":\"" + jsonEsc(statusShort()) + "\",\"grid\":" + trackJson(grid) +
              ",\"line\":" + trackJson(line).substring(0, trackJson(line).length() - 1) + ",\"enabled\":" + (lineEnabled() ? "true" : "false") + "}" +
              ",\"avr\":{\"assigned\":" + (avrAssigned() ? "true" : "false") + ",\"mac\":\"" + jsonEsc(S.avrMac) + "\"}" +
+             ",\"city\":{\"set\":" + (citySet() ? "true" : "false") + ",\"bcn\":" + (hasRole('c') ? "true" : "false") + "}" +
              ",\"bcn\":{\"legacy\":" + (legacy() ? "true" : "false") + ",\"max\":" + String(MAXB) + ",\"list\":[";
   //  1.0.23: маячки зі списку (cfg) і чуті, яких у списку немає
   bool firstItem = true;

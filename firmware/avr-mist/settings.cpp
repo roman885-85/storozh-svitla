@@ -46,6 +46,7 @@ void settingsLoad() {
   S.lineOnSec   = gu("lOn", 10);
   S.lineWarnSec = gu("lWarn", 120);
   S.genRemMin   = gu("genRem", 10);
+  S.swMode      = (uint8_t)gu("swMode", 0);
   S.sumOn       = gb("sumOn", true);
   S.sumHour     = (uint8_t)gu("sumHr", 8);
   S.ledOn   = gb("ledOn", false);
@@ -187,6 +188,7 @@ bool settingsSave() {
   p.putUShort("lOn", S.lineOnSec);
   p.putUShort("lWarn", S.lineWarnSec);
   p.putUShort("genRem", S.genRemMin);
+  p.putUShort("swMode", S.swMode);
   p.putUShort("pwBtn", S.pwBtn);
   p.putBool("schOn", S.schOn);
   p.putUShort("schReg", S.schRegion);
@@ -273,7 +275,7 @@ void settingsFactoryReset() {
 //  (не «стерти все й записати заново»), тож обрив живлення посередині зв'язку не зіпсує. Нові налаштування в майбутніх
 //  версіях теж скидатимуться самі: стирається все, чого немає в KEEP.
 bool settingsResetPrefs() {
-  static const char* KEEP[] = {"staSsid", "staPass", "staBssid", "apSsid", "apPass", "admin", "tgToken", "tgChats", "avrMac", "bcn"};
+  static const char* KEEP[] = {"staSsid", "staPass", "staBssid", "apSsid", "apPass", "admin", "tgToken", "tgChats", "avrMac", "bcn", "swMode"};   // 1.0.57: вид перемикача — як і АВР, частина обладнання
   if (wiped) return false;
   //  1.0.38: список ключів — у купі лише на час скидання (було 1,5 КБ статичної пам'яті назавжди)
   typedef char Key[NVS_KEY_NAME_MAX_SIZE];

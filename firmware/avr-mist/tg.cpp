@@ -654,9 +654,10 @@ static String diagText() {
              "\nПам'ять: вільно " + String(memFree() / 1024) + " КБ, найменше було " + String(memMin() / 1024) + " КБ" +
              "\n📶 Wi-Fi: " + (staUp() ? htmlEsc(S.staSsid) + ", " + String(staRssi()) + " дБм" : String("роутер не відповідає"));
   int ar;
-  if (!watchAvrSet()) r += "\n🔌 АВР: не призначено";
+  if (!watchAvrSet()) r += watchCitySet() ? "\n🔌 АВР: немає — місто за маячком «Міське світло»" : "\n🔌 АВР: не призначено";
   else if (watchAvrRssi(ar)) r += "\n🔌 АВР: у мережі, " + String(ar) + " дБм";
   else r += "\n🔌 АВР: немає в мережі";
+  if (S.swMode == 1) r += "\n🔁 Перемикач: ручний — Сторож підказує, коли й на що переключити";   // 1.0.57
   r += "\n📡 Маячки:" + watchBeaconsText();
   r += bmsDiagLine();                            // 1.0.36
   r += schDiagLine();

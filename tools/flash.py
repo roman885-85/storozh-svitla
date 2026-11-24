@@ -5,6 +5,7 @@
 
     python3 tools/flash.py mist  [--port ПОРТ] [--new]
     python3 tools/flash.py mayak [--port ПОРТ] [--new] [--wifi "назва точки" "пароль"]
+                                   — маячок: ESP8266, ESP32, ESP32-C3, S2, S3, C6 — образ за чипом сам
     python3 tools/flash.py bms   [--port ПОРТ] [--new]                — міст батареї JK BMS
     python3 tools/flash.py mist --app build/mist/avr-mist-1.0.5-app.bin   — записати саме цю версію (відкат)
     (у Windows — py tools\\flash.py …; ПОРТ — COM5, /dev/ttyUSB0, /dev/cu.usbserial-0001…)
@@ -21,7 +22,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build as B                                   # теки, esptool з ядра, версії
 
 ROOT, DEV = B.ROOT, os.path.join(B.ROOT, 'tools', 'devices.txt')
-USB_SERIAL = {0x10C4: 'CP210x', 0x1A86: 'CH34x', 0x0403: 'FTDI', 0x303A: 'Espressif (рідний USB)'}
+USB_SERIAL = {0x10C4: 'CP210x', 0x1A86: 'CH34x', 0x0403: 'FTDI', 0x303A: 'Espressif (рідний USB)', 0x067B: 'PL2303'}
+#  Маячок (1.1.0): чип → варіант збірки (tools/build.py MAYAK); ESP32-C3 — ще й usb чи uart за портом
+MAYAK_BY_CHIP = {'ESP8266': 'esp8266', 'ESP32': 'esp32', 'ESP32-S2': 's2', 'ESP32-S3': 's3', 'ESP32-C6': 'c6'}
 
 
 def ports():
@@ -84,14 +87,16 @@ def main():
     rc, info = esptool_run(esptool, ['--port', port, 'read-mac'], capture=True)
     if rc:
         B.die(info + '\nНе вдалося прочитати плату', 4)
-    m = re.search(r'(?:Connected to|Detecting chip type\.\.\.)\s+(ESP32[-A-Z0-9]*)', info)
+    m = re.search(r'(?:Connected to|Detecting chip type\.\.\.)\s+(ESP32[-A-Z0-9]*|ESP8266)', info)
     chip = m.group(1) if m else ''
     m = re.search(r'(?im)^MAC:?\s*(([0-9a-f]{2}:){5}[0-9a-f]{2})', info)
     mac = m.group(1).lower() if m else ''
     print('    чип %s, MAC %s' % (chip, mac))
     if not chip or not mac:
         B.die(info + '\nНе розібрав відповідь esptool', 4)
-    if chip != want:
+    if role == 'mayak' and (chip in MAYAK_BY_CHIP or chip == 'ESP32-C3'):
+        pass                                        # маячок — на будь-якій із цих плат
+    elif chip != want:
         B.die('Це %s, а для «%s» потрібен %s — нічого не пишу' % (chip, role, want), 5)
 
     known = ''
@@ -112,9 +117,12 @@ def main():
         d, name, boot, echip = os.path.join(ROOT, 'build', 'mist'), 'avr-mist', '0x1000', 'esp32'
         ver = B.read_ver('VERSION')
     else:
-        v = 'usb' if native_usb(port) else 'uart'
+        v = MAYAK_BY_CHIP.get(chip) if role == 'mayak' else None
+        if not v:
+            v = 'usb' if native_usb(port) else 'uart'
         d = os.path.join(ROOT, 'build', ('bms-' if role == 'bms' else 'mayak-') + v)
-        name, boot, echip = ('avr-bms' if role == 'bms' else 'avr-mayak'), '0x0', 'esp32c3'
+        name = 'avr-bms' if role == 'bms' else 'avr-mayak'
+        _, _, echip, boot = next(x for x in B.MAYAK if x[0] == v) if role == 'mayak' else (0, 0, 'esp32c3', '0x0')
         ver = B.read_ver('VERSION-bms' if role == 'bms' else 'VERSION-mayak')
         print('    варіант плати: %s' % v)
     if app:
@@ -144,6 +152,10 @@ def main():
         if rc: fail(rc)
         with open(DEV, 'a', encoding='utf-8') as f:
             f.write('%s  %s  перша прошивка %s, %s\n' % (mac, role, datetime.datetime.now().strftime('%d.%m.%Y %H:%M'), chip))
+    elif boot is None:                              # ESP8266: образ з адреси 0x0; мережа маячка (EEPROM у кінці флешу) лишається
+        print('>>> пишу %s %s (налаштування лишаються)' % (name, ver))
+        rc, _ = esptool_run(esptool, ['--chip', echip, '--port', port, 'write-flash', '0x0', appbin if app else os.path.join(d, '%s-%s-full.bin' % (name, ver))])
+        if rc: fail(rc)
     else:
         print('>>> пишу %s %s (налаштування лишаються)' % (name, ver))
         rc, _ = esptool_run(esptool, ['--chip', echip, '--port', port, 'write-flash',

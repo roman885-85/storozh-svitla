@@ -2,12 +2,14 @@
 # -*- coding: utf-8 -*-
 """Збирання прошивок «Сторожа світла» на будь-якій системі — Windows, Linux, macOS.
 
-    python3 tools/build.py --setup                 один раз: ядро esp32 3.3.3 для arduino-cli
+    python3 tools/build.py --setup                 один раз: ядра esp32 3.3.3 і esp8266 3.1.2 для arduino-cli
     python3 tools/build.py [all|mist|mayak|bms]    зібрати (усе — без аргументу)
+    python3 tools/build.py mayak:esp8266,usb       лише ці варіанти маячка
     (у Windows — py tools\\build.py …)
 
     mist  — Сторож (ESP32 WROOM), версія — firmware/VERSION
-    mayak — маячок (ESP32-C3; два варіанти: usb і uart), версія — firmware/VERSION-mayak
+    mayak — маячок на будь-якій недорогій платі ESP, версія — firmware/VERSION-mayak: ESP32-C3 (usb — рідний USB,
+            uart — з перетворювачем USB-UART), esp32 (ESP32 DevKit), s2, s3, c6, esp8266 (ESP-01S, D1 mini, NodeMCU)
     bms   — міст батареї JK BMS (ESP32-C3, ті самі два варіанти), версія — firmware/VERSION-bms
 
 Результат — build/<назва>/…-full.bin (усе одним образом з адреси 0x0, для прошивки кабелем) і …-app.bin (для
@@ -20,6 +22,18 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 OUT = os.environ.get('BUILD_OUT') or os.path.join(ROOT, 'build')   # BUILD_OUT — зібрати деінде (перевірки)
 CORE_VER = '3.3.3'
 INDEX = 'https://espressif.github.io/arduino-esp32/package_esp32_index.json'
+INDEX8266 = 'https://arduino.esp8266.com/stable/package_esp8266com_index.json'
+CORE8266 = '3.1.2'
+#  Маячок (1.1.0): варіант → (FQBN, чип для esptool, адреса завантажувача; None — у ESP8266 образ і так з адреси 0x0)
+MAYAK = [
+    ('usb', 'esp32:esp32:AirM2M_CORE_ESP32C3:CDCOnBoot=cdc', 'esp32c3', '0x0'),
+    ('uart', 'esp32:esp32:AirM2M_CORE_ESP32C3:CDCOnBoot=default', 'esp32c3', '0x0'),
+    ('esp32', 'esp32:esp32:esp32', 'esp32', '0x1000'),
+    ('s2', 'esp32:esp32:esp32s2:CDCOnBoot=cdc', 'esp32s2', '0x1000'),
+    ('s3', 'esp32:esp32:esp32s3:CDCOnBoot=cdc', 'esp32s3', '0x0'),
+    ('c6', 'esp32:esp32:esp32c6:CDCOnBoot=cdc', 'esp32c6', '0x0'),
+    ('esp8266', 'esp8266:esp8266:generic', 'esp8266', None),
+]
 
 if hasattr(sys.stdout, 'reconfigure'):            # консоль Windows: кирилиця не має валити скрипт
     sys.stdout.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)   # хід — одразу, і в журналі
@@ -80,12 +94,17 @@ def core_and_esptool():
 
 def setup():
     c = cli()
-    for args in (['core', 'update-index'], ['core', 'install', 'esp32:esp32@' + CORE_VER]):
+    urls = INDEX + ',' + INDEX8266
+    for args in (['core', 'update-index'], ['core', 'install', 'esp32:esp32@' + CORE_VER], ['core', 'install', 'esp8266:esp8266@' + CORE8266]):
         print('>>> arduino-cli ' + ' '.join(args))
-        if subprocess.run([c] + args + ['--additional-urls', INDEX]).returncode:
+        if subprocess.run([c] + args + ['--additional-urls', urls]).returncode:
             die('arduino-cli не впорався — див. вище')
     core_and_esptool()
-    print('Готово: ядро esp32 %s у %s' % (CORE_VER, data_dir()))
+    print('Готово: ядра esp32 %s і esp8266 %s у %s' % (CORE_VER, CORE8266, data_dir()))
+
+
+def have8266():
+    return os.path.isdir(os.path.join(data_dir(), 'packages', 'esp8266', 'hardware', 'esp8266', CORE8266))
 
 
 def read_ver(name):
@@ -117,6 +136,11 @@ def compile_sketch(fqbn, sketch, bp, od, props=()):
 def merge(chip, d, name, boot, ver, core, esptool):
     """Повний образ з адреси 0x0 (завантажувач, розділи, boot_app0, програма) і окремо програма для оновлення."""
     full = '%s-%s-full.bin' % (name, ver)
+    if boot is None:                                  # ESP8266: образ збірки вже з адреси 0x0, разом із завантажувачем
+        shutil.copyfile(os.path.join(d, name + '.ino.bin'), os.path.join(d, full))
+        shutil.copyfile(os.path.join(d, name + '.ino.bin'), os.path.join(d, '%s-%s-app.bin' % (name, ver)))   # той самий образ
+        print('    ' + os.path.join(d, full))
+        return
     cmd = esptool + ['--chip', chip, 'merge-bin', '-o', full, '--flash-mode', 'keep', '--flash-freq', 'keep',
                      '--flash-size', 'keep', boot, name + '.ino.bootloader.bin', '0x8000', name + '.ino.partitions.bin',
                      '0xe000', os.path.join(core, 'tools', 'partitions', 'boot_app0.bin'), '0x10000', name + '.ino.bin']
@@ -147,19 +171,24 @@ def build(what):
             die('ЗБІРКА СТОРОЖА НЕ ВДАЛАСЬ (код %s)' % rc)
         merge('esp32', od, 'avr-mist', '0x1000', ver, core, esptool)
 
-    if what in ('all', 'mayak'):
+    if what in ('all', 'mayak') or what.startswith('mayak:'):
         s, ver = os.path.join(fw, 'avr-mayak'), read_ver('VERSION-mayak')
         ver_h(s, ver, stamp)
-        for v in ('usb', 'uart'):
+        only = what.split(':', 1)[1].split(',') if what.startswith('mayak:') else None   # mayak:esp8266,s3 — лише ці
+        for v, fqbn, chip, boot in MAYAK:
+            if only and v not in only:
+                continue
+            if v == 'esp8266' and not have8266():
+                print('>>> маячок %s, ESP8266 — ПРОПУЩЕНО: немає ядра esp8266 %s (python3 tools/build.py --setup)' % (ver, CORE8266))
+                continue
             print('>>> маячок %s, варіант %s (%s)' % (ver, v, stamp))
             od = os.path.join(OUT, 'mayak-' + v)
             rm(os.path.join(od, 'avr-mayak.ino.*'))
             rm(os.path.join(od, 'avr-mayak-%s-*.bin' % ver))
-            rc = compile_sketch('esp32:esp32:AirM2M_CORE_ESP32C3:CDCOnBoot=' + ('cdc' if v == 'usb' else 'default'), s,
-                                os.path.join(OUT, 'mayak-%s-bp' % v), od)
+            rc = compile_sketch(fqbn, s, os.path.join(OUT, 'mayak-%s-bp' % v), od)
             if rc or not os.path.isfile(os.path.join(od, 'avr-mayak.ino.bin')):
-                die('ЗБІРКА МАЯЧКА НЕ ВДАЛАСЬ (код %s)' % rc)
-            merge('esp32c3', od, 'avr-mayak', '0x0', ver, core, esptool)
+                die('ЗБІРКА МАЯЧКА НЕ ВДАЛАСЬ (%s, код %s)' % (v, rc))
+            merge(chip, od, 'avr-mayak', boot, ver, core, esptool)
 
     #  Міст батареї (22.11.2026): Bluetooth і Wi-Fi разом не вміщаються в типові 1,25 МБ — схема min_spiffs (1,9 МБ на
     #  прошивку, з оновленням по мережі); у меню цієї плати її немає, тож задаємо властивостями збірки.
@@ -189,7 +218,7 @@ def main():
     if a[:1] == ['--setup']:
         return setup()
     what = a[0] if a else 'all'
-    if what not in ('all', 'mist', 'mayak', 'bms'):
+    if what not in ('all', 'mist', 'mayak', 'bms') and not what.startswith('mayak:'):
         die(__doc__, 2)
     build(what)
 

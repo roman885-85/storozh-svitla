@@ -1,8 +1,11 @@
-/*  АВР-маячок — ESP32-C3 (плата AirM2M / LuatOS «ESP32-C3 Core»).
+/*  АВР-маячок — будь-яка недорога плата ESP (1.1.0, власник 24.11.2026: «для маячков чтобы можно было использовать самые
+ *  простые и дешевые модули esp»): ESP8266 (ESP-01S, Wemos D1 mini, NodeMCU, ESP-12), ESP32 (DevKit), ESP32-C3 (зокрема
+ *  AirM2M / LuatOS «ESP32-C3 Core» і SuperMini), ESP32-S2, ESP32-S3, ESP32-C6. Програма одна, відмінності — лише кнопка,
+ *  світлодіод і де зберігати мережу (ESP8266 — EEPROM, решта — NVS).
  *
- *  Вмикається через звичайний USB-зарядник у розетку на ВИХОДІ ГЕНЕРАТОРА (до АВР) — 18.11.2026, власник:
- *  «маячок подключён к выходу напряжения генератора и активен только когда работает генератор». Поки генератор
- *  працює, маячок живий і кожні 2 с каже Сторожу «я тут» (UDP на 10.77.0.1:47801). Замовк — генератор зупинився.
+ *  Вмикається через звичайний USB-зарядник у розетку, за якою має стежити: від генератора (роль «Генератор» на сторінці
+ *  Сторожа), лише від міста («Міське світло») чи на лінії після АВР або перемикача («Лінія чи фаза»). Поки в розетці є
+ *  напруга, маячок живий і кожні 2 с каже Сторожу «я тут» (UDP на 10.77.0.1:47801). Замовк — напруги немає.
  *
  *  Налаштування з телефона (1.0.16, власник: «маячок должен иметь свой веб интерфейс для подключения к сторожу»):
  *  маячок без мережі Сторожа (ще не задано, 3 хв без зв'язку або кнопка BOOT 3 с) піднімає свою відкриту мережу
@@ -19,27 +22,97 @@
  *  Світлодіоди: D4 (GPIO12) коротко блимає на кожен сигнал мосту; D5 (GPIO13) блимає,
  *  поки зв'язку з точкою моста немає.
  */
+#if defined(ESP8266)
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <EEPROM.h>
+typedef ESP8266WebServer WebSrv;
+//  причини обриву — ті самі числа, що в ESP32 (коди 802.11 і 200+ від Espressif)
+#define WIFI_REASON_AUTH_FAIL WIFI_DISCONNECT_REASON_AUTH_FAIL
+#define WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT WIFI_DISCONNECT_REASON_4WAY_HANDSHAKE_TIMEOUT
+#define WIFI_REASON_HANDSHAKE_TIMEOUT WIFI_DISCONNECT_REASON_HANDSHAKE_TIMEOUT
+#define WIFI_REASON_AUTH_EXPIRE WIFI_DISCONNECT_REASON_AUTH_EXPIRE
+#define WIFI_REASON_802_1X_AUTH_FAILED WIFI_DISCONNECT_REASON_802_1X_AUTH_FAILED
+#define WIFI_REASON_MIC_FAILURE WIFI_DISCONNECT_REASON_MIC_FAILURE
+#define WIFI_REASON_NO_AP_FOUND WIFI_DISCONNECT_REASON_NO_AP_FOUND
+#define WIFI_REASON_ASSOC_TOOMANY WIFI_DISCONNECT_REASON_ASSOC_TOOMANY
+#define WIFI_REASON_ASSOC_LEAVE WIFI_DISCONNECT_REASON_ASSOC_LEAVE
+#define SCAN(async) WiFi.scanNetworks(async, false)
+static const char* CHIP = "ESP8266";
+#else
 #include <WiFi.h>
-#include <WiFiUdp.h>
 #include <WebServer.h>
-#include <DNSServer.h>
 #include <Preferences.h>
 #include <esp_mac.h>
 #include <esp_chip_info.h>
+typedef WebServer WebSrv;
+#define SCAN(async) WiFi.scanNetworks(async, false, false, 120)
+#if CONFIG_IDF_TARGET_ESP32C3
+static const char* CHIP = "ESP32-C3";
+#elif CONFIG_IDF_TARGET_ESP32S2
+static const char* CHIP = "ESP32-S2";
+#elif CONFIG_IDF_TARGET_ESP32S3
+static const char* CHIP = "ESP32-S3";
+#elif CONFIG_IDF_TARGET_ESP32C6
+static const char* CHIP = "ESP32-C6";
+#else
+static const char* CHIP = "ESP32";
+#endif
+#endif
+#include <WiFiUdp.h>
+#include <DNSServer.h>
 #include "version.h"
 
+//  Світлодіоди. ESP32-C3 AirM2M (як було до 1.1.0): D4 (GPIO12) — коротко на кожен сигнал, D5 (GPIO13) — блимає без
+//  зв'язку; у C3 з вбудованою флеш (SuperMini) ці виводи зайняті нею — тоді не чіпаємо. Решта плат — один світлодіод на
+//  платі: спалах на кожен сигнал, блимає без зв'язку (ESP8266 — GPIO2, світиться від «0»; ESP32 DevKit — GPIO2; S2, S3,
+//  C6 — вбудований, на багатьох платах кольоровий).
+#if CONFIG_IDF_TARGET_ESP32C3
 static const int LED_BEAT = 12, LED_NOLINK = 13;
+static const bool LED_INV = false;
+#elif defined(ESP8266)
+static const int LED_BEAT = 2, LED_NOLINK = -1;
+static const bool LED_INV = true;
+#elif CONFIG_IDF_TARGET_ESP32
+static const int LED_BEAT = 2, LED_NOLINK = -1;
+static const bool LED_INV = false;
+#elif defined(LED_BUILTIN)
+static const int LED_BEAT = LED_BUILTIN, LED_NOLINK = -1;
+static const bool LED_INV = false;
+#else
+static const int LED_BEAT = -1, LED_NOLINK = -1;
+static const bool LED_INV = false;
+#endif
+//  Кнопка BOOT (на ESP8266 — FLASH, GPIO0): утримати 3 с — сторінка налаштування. На платах без кнопки (ESP-01S, D1 mini)
+//  сторінка з'являється й сама — коли мережу ще не задано чи 3 хв немає зв'язку зі Сторожем.
+#if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
+static const int BTN = 9;
+#else
+static const int BTN = 0;
+#endif
+//  S2, S3, C6 з «USB CDC On Boot»: повідомлення й команди — і через рідний USB, і через UART0 (плата з перетворювачем
+//  USB-UART), щоб один образ підходив до обох портів.
+#if !defined(ESP8266) && ARDUINO_USB_CDC_ON_BOOT && (CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32C6)
+#define DUAL_SERIAL 1
+class Tee : public Print {
+ public:
+  size_t write(uint8_t c) override { Serial.write(c); Serial0.write(c); return 1; }
+  size_t write(const uint8_t* b, size_t n) override { Serial.write(b, n); Serial0.write(b, n); return n; }
+};
+static Tee OUT;
+#else
+#define OUT Serial
+#endif
 static const uint16_t BRIDGE_PORT = 47801;
-static String ssid, pass, macS, cmdLine;
+static String ssid, pass, macS, cmdLine, cmdLine0;
 static WiFiUDP udp;
 static uint32_t lastBeat = 0, lastLink = 0, lastTry = 0, pauseUntil = 0;
 static bool paused = false;
 static bool leds = false;   // на C3 з вбудованою флеш виводи 12/13 зайняті нею — тоді світлодіодів не чіпаємо
 
 // ---------- сторінка налаштування (1.0.16) ----------
-static const int BTN = 9;                        // кнопка BOOT на C3: утримати 3 с — увімкнути сторінку налаштування
 static const IPAddress AP_IP(192, 168, 4, 1);
-static WebServer web(80);
+static WebSrv web(80);
 static DNSServer dns;
 static bool setupOn = false;
 static uint32_t setupSince = 0, linkSince = 0;
@@ -47,8 +120,33 @@ static String apName, lastErr;
 static volatile uint16_t discReason = 0;         // причина останнього обриву (подія Wi-Fi), розбирає loop()
 static volatile bool gotIp = false;
 
-static void led(int pin, int v) { if (leds) digitalWrite(pin, v); }
+static void led(int pin, int v) { if (leds && pin >= 0) digitalWrite(pin, LED_INV ? !v : v); }
 
+#if defined(ESP8266)
+//  ESP8266: мережа — в EEPROM (останній сектор флешу перед налаштуваннями SDK), пише лише saveCreds()
+struct Creds { uint32_t magic; char ssid[33]; char pass[65]; };
+static const uint32_t CREDS_MAGIC = 0x4D41594B;   // «MAYK»
+static void loadCreds() {
+  Creds c;
+  EEPROM.begin(sizeof(Creds));
+  EEPROM.get(0, c);
+  EEPROM.end();
+  if (c.magic != CREDS_MAGIC) return;
+  c.ssid[32] = 0; c.pass[64] = 0;
+  ssid = c.ssid; pass = c.pass;
+}
+static void saveCreds() {
+  Creds c;
+  memset(&c, 0, sizeof c);
+  c.magic = CREDS_MAGIC;
+  strncpy(c.ssid, ssid.c_str(), 32);
+  strncpy(c.pass, pass.c_str(), 64);
+  EEPROM.begin(sizeof(Creds));
+  EEPROM.put(0, c);
+  EEPROM.commit();
+  EEPROM.end();
+}
+#else
 static void loadCreds() {
   Preferences p;
   if (p.begin("mayak", true)) { ssid = p.getString("ssid", ""); pass = p.getString("pass", ""); p.end(); }
@@ -57,6 +155,7 @@ static void saveCreds() {
   Preferences p;
   if (p.begin("mayak", false)) { p.putString("ssid", ssid); p.putString("pass", pass); p.end(); }
 }
+#endif
 static void connect() {
   lastTry = millis();
   if (!ssid.length()) return;
@@ -76,7 +175,7 @@ static String jsonEsc(const String& s) {
   return o;
 }
 
-static const char PAGE[] = R"PAGE(<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+static const char PAGE[] PROGMEM = R"PAGE(<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Маячок</title><style>
 :root{--bg:#14161c;--card:#1d2028;--fg:#e8e8ec;--mut:#9aa0ab;--acc:#2f7de1;--bd:#2c303b;--ok:#2fb36b;--bad:#e05252}
 @media (prefers-color-scheme:light){:root{--bg:#f3f4f7;--card:#fff;--fg:#16181d;--mut:#5d6470;--bd:#d9dce3}}
@@ -101,13 +200,13 @@ button.s{background:none;border:1px solid var(--bd);color:var(--fg);font-weight:
 <label for="pw">Пароль мережі</label><input id="pw" type="password" maxlength="63" autocomplete="new-password">
 <label class="row"><input type="checkbox" id="sh"> показати пароль</label>
 <button id="go" type="button">Під'єднати</button><div id="msg" style="margin-top:8px"></div></div>
-<div class="card mut" id="done">Коли маячок під'єднається, він сам вимкне свою мережу «<span id="apn"></span>». Далі: увімкнути його через USB-зарядник у розетку <b>від генератора</b> — на виході генератора, до АВР; не в ДБЖ і не в міську розетку: маячок має жити, лише поки працює генератор. На сторінці Сторожа в «Налаштування → АВР і маячок» поставити «Маячок встановлено».</div>
+<div class="card mut" id="done">Коли маячок під'єднається, він сам вимкне свою мережу «<span id="apn"></span>». Далі: увімкнути його через USB-зарядник у розетку, за якою він має стежити, — <b>від генератора</b> (на виході генератора, до АВР чи перемикача), <b>лише від міста</b> (до АВР чи перемикача) чи <b>на лінії</b> після них; не в ДБЖ. На сторінці Сторожа: вкладка «Стан», картка «Пристрої» — «Додати маячок» і вибрати роль: «Генератор», «Міське світло» чи «Лінія чи фаза».</div>
 </main><script>
 const $=i=>document.getElementById(i),W=ms=>new Promise(r=>setTimeout(r,ms));
 function esc(t){return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 async function st(){try{const s=await (await fetch('/state',{cache:'no-store'})).json();
- $('who').textContent='Версія '+s.ver+' · MAC '+s.mac;$('apn').textContent=s.ap;$('form').style.display=s.setup?'':'none';
- $('st').innerHTML=s.conn?'<span class="ok">● На зв\'язку зі Сторожем</span>: мережа «'+esc(s.ssid)+'», сигнал '+s.rssi+' дБм'+(s.setup?'':'<div class="mut">Змінити мережу: утримати кнопку BOOT на маячку 3 секунди — з\'явиться мережа «'+esc(s.ap)+'».</div>')
+ $('who').textContent='Версія '+s.ver+' · '+(s.chip||'ESP')+' · MAC '+s.mac;$('apn').textContent=s.ap;$('form').style.display=s.setup?'':'none';
+ $('st').innerHTML=s.conn?'<span class="ok">● На зв\'язку зі Сторожем</span>: мережа «'+esc(s.ssid)+'», сигнал '+s.rssi+' дБм'+(s.setup?'':'<div class="mut">Змінити мережу: утримати кнопку BOOT (FLASH) на маячку 3 секунди — з\'явиться мережа «'+esc(s.ap)+'». На платі без кнопки мережа маячка з\'являється сама, коли він 3 хвилини не бачить мережі Сторожа.</div>')
   :s.ssid?'<span class="bad">● Немає зв\'язку</span> з мережею «'+esc(s.ssid)+'»'+(s.err?': '+esc(s.err):''):'<span class="bad">● Мережу Сторожа ще не задано</span>';
  return s}catch(e){return null}}
 async function scan(fresh){$('rescan').disabled=true;for(let i=0;i<25;i++){let r=null;try{r=await (await fetch('/scan'+(fresh&&!i?'?new=1':''),{cache:'no-store'})).json()}catch(e){}
@@ -149,12 +248,12 @@ static void startSetup(const char* why) {
   WiFi.setAutoReconnect(false);                  // без безперервних спроб: кожна перебирає канали, і телефон губить мережу маячка
   WiFi.mode(WIFI_AP_STA);
   int ch = 1;
-  int n = WiFi.scanNetworks(false, false, false, 120);      // канал — як у мережі Сторожа: тоді під'єднання не перескочить каналом
+  int n = SCAN(false);                           // канал — як у мережі Сторожа: тоді під'єднання не перескочить каналом
   for (int i = 0; i < n; i++) if ((ssid.length() && WiFi.SSID(i) == ssid) || WiFi.SSID(i).startsWith("AVR-mist-")) { ch = WiFi.channel(i); break; }
   WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
   WiFi.softAP(apName.c_str(), nullptr, ch);
   dns.start(53, "*", AP_IP);
-  Serial.printf("Сторінка налаштування: мережа «%s» без пароля, канал %d, http://192.168.4.1 (%s)\n", apName.c_str(), ch, why);
+  OUT.printf("Сторінка налаштування: мережа «%s» без пароля, канал %d, http://192.168.4.1 (%s)\n", apName.c_str(), ch, why);
 }
 static void stopSetup() {
   if (!setupOn) return;
@@ -163,13 +262,17 @@ static void stopSetup() {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   setupOn = false;
-  Serial.println("Сторінку налаштування вимкнено: маячок на зв'язку зі Сторожем");
+  OUT.println("Сторінку налаштування вимкнено: маячок на зв'язку зі Сторожем");
 }
 
+#if defined(ESP8266)
+static void hRoot() { web.send_P(200, "text/html; charset=utf-8", PAGE); }
+#else
 static void hRoot() { web.send(200, "text/html; charset=utf-8", PAGE); }
+#endif
 static void hState() {
   bool c = WiFi.isConnected();
-  String o = String("{\"ver\":\"") + FW_VERSION + "\",\"mac\":\"" + macS + "\",\"ssid\":\"" + jsonEsc(ssid) + "\",\"conn\":" + (c ? "true" : "false") +
+  String o = String("{\"ver\":\"") + FW_VERSION + "\",\"chip\":\"" + CHIP + "\",\"mac\":\"" + macS + "\",\"ssid\":\"" + jsonEsc(ssid) + "\",\"conn\":" + (c ? "true" : "false") +
              ",\"rssi\":" + String(c ? WiFi.RSSI() : 0) + ",\"err\":\"" + jsonEsc(lastErr) + "\",\"ap\":\"" + jsonEsc(apName) +
              "\",\"setup\":" + (setupOn ? "true" : "false") + "}";
   web.sendHeader("Cache-Control", "no-store");
@@ -179,7 +282,7 @@ static void hScan() {
   web.sendHeader("Cache-Control", "no-store");
   int n = WiFi.scanComplete();
   if (web.hasArg("new") || n == WIFI_SCAN_FAILED) {
-    if (n != WIFI_SCAN_RUNNING) { WiFi.scanDelete(); WiFi.scanNetworks(true, false, false, 120); }
+    if (n != WIFI_SCAN_RUNNING) { WiFi.scanDelete(); SCAN(true); }
     return web.send(200, "application/json", "{\"busy\":true}");
   }
   if (n == WIFI_SCAN_RUNNING) return web.send(200, "application/json", "{\"busy\":true}");
@@ -205,7 +308,7 @@ static void hScan() {
   web.send(200, "application/json", o + "]}");
 }
 static void hSave() {
-  if (!setupOn) return web.send(403, "application/json", "{\"err\":\"Змінити мережу можна лише зі сторінки налаштування (кнопка BOOT 3 с)\"}");
+  if (!setupOn) return web.send(403, "application/json", "{\"err\":\"Змінити мережу можна лише зі сторінки налаштування (кнопка BOOT 3 с чи 3 хв без зв'язку зі Сторожем)\"}");
   String s = web.arg("ssid"), p = web.arg("pass");
   s.trim();
   if (!s.length() || s.length() > 32) return web.send(400, "application/json", "{\"err\":\"Назва мережі — від 1 до 32 символів\"}");
@@ -214,7 +317,7 @@ static void hSave() {
   pass = p;
   saveCreds();
   lastErr = "";
-  Serial.printf("Сторінка: збережено мережу «%s». Під'єднуюсь…\n", ssid.c_str());
+  OUT.printf("Сторінка: збережено мережу «%s». Під'єднуюсь…\n", ssid.c_str());
   connect();
   web.send(200, "application/json", "{\"ok\":true}");
 }
@@ -224,7 +327,7 @@ static uint32_t rebootAt = 0;
 static void hReboot() {
   bool trusted = setupOn || (WiFi.isConnected() && web.client().remoteIP() == WiFi.gatewayIP());
   if (!trusted) return web.send(403, "application/json", "{\"err\":\"Перезапустити можна зі сторінки налаштування маячка (кнопка BOOT 3 с)\"}");
-  Serial.println("Сторінка: перезапуск маячка");
+  OUT.println("Сторінка: перезапуск маячка");
   rebootAt = (millis() + 600) | 1;
   web.send(200, "application/json", "{\"ok\":true}");
 }
@@ -243,13 +346,13 @@ static void bootBtn(uint32_t now) {               // BOOT 3 с — сторін�
 }
 
 static void info() {
-  Serial.printf("\nАВР-маячок %s (збірка %s), MAC %s\n", FW_VERSION, FW_BUILD, macS.c_str());
-  if (!ssid.length()) Serial.println("Мережу Сторожа не задано: сторінка маячка або команда wifi <назва> <пароль>");
+  OUT.printf("\nАВР-маячок %s (збірка %s), %s, MAC %s\n", FW_VERSION, FW_BUILD, CHIP, macS.c_str());
+  if (!ssid.length()) OUT.println("Мережу Сторожа не задано: сторінка маячка або команда wifi <назва> <пароль>");
   else if (WiFi.isConnected())
-    Serial.printf("Мережа «%s»: під'єднано, адреса %s, Сторож %s, сигнал %d дБм\n", ssid.c_str(),
+    OUT.printf("Мережа «%s»: під'єднано, адреса %s, Сторож %s, сигнал %d дБм\n", ssid.c_str(),
                   WiFi.localIP().toString().c_str(), WiFi.gatewayIP().toString().c_str(), WiFi.RSSI());
-  else Serial.printf("Мережа «%s»: немає зв'язку%s%s\n", ssid.c_str(), lastErr.length() ? " — " : "", lastErr.c_str());
-  if (setupOn) Serial.printf("Сторінка налаштування: мережа «%s» без пароля, http://192.168.4.1\n", apName.c_str());
+  else OUT.printf("Мережа «%s»: немає зв'язку%s%s\n", ssid.c_str(), lastErr.length() ? " — " : "", lastErr.c_str());
+  if (setupOn) OUT.printf("Сторінка налаштування: мережа «%s» без пароля, http://192.168.4.1\n", apName.c_str());
 }
 
 //  Розбір «a b» або «"a b" "c d"»: два слова, кожне можна взяти в лапки.
@@ -269,9 +372,9 @@ static bool two(const String& s, String& a, String& b) {
   return true;
 }
 
-static void serialCmd() {
-  while (Serial.available()) {
-    char c = Serial.read();
+static void serialCmd(Stream& io, String& cmdLine) {
+  while (io.available()) {
+    char c = io.read();
     if (c == '\r') continue;
     if (c != '\n') { if (cmdLine.length() < 200) cmdLine += c; continue; }
     String l = cmdLine;
@@ -283,33 +386,52 @@ static void serialCmd() {
         ssid = a;
         pass = b;
         saveCreds();
-        Serial.printf("Збережено: точка «%s». Під'єднуюсь…\n", ssid.c_str());
+        OUT.printf("Збережено: точка «%s». Під'єднуюсь…\n", ssid.c_str());
         connect();
-      } else Serial.println("Формат: wifi <назва точки> <пароль від 8 символів>; у лапках, якщо є пробіли");
+      } else OUT.println("Формат: wifi <назва точки> <пароль від 8 символів>; у лапках, якщо є пробіли");
     } else if (l == "info") info();
     else if (l.startsWith("pause ")) {
       long s = l.substring(6).toInt();
       if (s > 0 && s <= 3600) {
-        Serial.printf("Перевірка: Wi-Fi вимкнено на %ld с\n", s);
+        OUT.printf("Перевірка: Wi-Fi вимкнено на %ld с\n", s);
         paused = true;
         pauseUntil = millis() + s * 1000UL;
         WiFi.disconnect(true);
         WiFi.mode(WIFI_OFF);
       }
     } else if (l == "reboot") ESP.restart();
-    else if (l.length()) Serial.println("Команди: wifi <назва> <пароль>, info, pause <с>, reboot");
+    else if (l.length()) OUT.println("Команди: wifi <назва> <пароль>, info, pause <с>, reboot");
   }
 }
 
+#if defined(ESP8266)
+static WiFiEventHandler evDisc, evIp;
+#endif
+
 void setup() {
   Serial.begin(115200);
+#ifdef DUAL_SERIAL
+  Serial0.begin(115200);
+#endif
+  uint8_t m[6];
+#if defined(ESP8266)
+  leds = LED_BEAT >= 0;                           // 80 МГц — і так типова частота ESP8266
+  WiFi.macAddress(m);
+#else
   setCpuFrequencyMhz(80);
+#if CONFIG_IDF_TARGET_ESP32C3
   esp_chip_info_t ci;
   esp_chip_info(&ci);
   leds = !(ci.features & CHIP_FEATURE_EMB_FLASH);
-  if (leds) { pinMode(LED_BEAT, OUTPUT); pinMode(LED_NOLINK, OUTPUT); }
-  uint8_t m[6];
+#else
+  leds = LED_BEAT >= 0;
+#endif
   esp_read_mac(m, ESP_MAC_WIFI_STA);
+#endif
+  if (leds) {
+    if (LED_BEAT >= 0) { pinMode(LED_BEAT, OUTPUT); led(LED_BEAT, LOW); }
+    if (LED_NOLINK >= 0) { pinMode(LED_NOLINK, OUTPUT); led(LED_NOLINK, LOW); }
+  }
   char b[18];
   snprintf(b, sizeof b, "%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5]);
   macS = b;
@@ -319,10 +441,15 @@ void setup() {
   pinMode(BTN, INPUT_PULLUP);
   loadCreds();
   WiFi.persistent(false);
+#if defined(ESP8266)
+  evDisc = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected& e) { discReason = e.reason; gotIp = false; });
+  evIp = WiFi.onStationModeGotIP([](const WiFiEventStationModeGotIP&) { discReason = 0; gotIp = true; });
+#else
   WiFi.onEvent([](WiFiEvent_t e, WiFiEventInfo_t i) {
     if (e == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) { discReason = i.wifi_sta_disconnected.reason; gotIp = false; }
     else if (e == ARDUINO_EVENT_WIFI_STA_GOT_IP) { discReason = 0; gotIp = true; }
   });
+#endif
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   web.on("/", HTTP_GET, hRoot);
@@ -340,7 +467,10 @@ void setup() {
 }
 
 void loop() {
-  serialCmd();
+  serialCmd(Serial, cmdLine);
+#ifdef DUAL_SERIAL
+  serialCmd(Serial0, cmdLine0);
+#endif
   web.handleClient();
   if (setupOn) dns.processNextRequest();
   if (rebootAt && (int32_t)(millis() - rebootAt) >= 0) ESP.restart();
@@ -350,17 +480,17 @@ void loop() {
   if (dr) {
     discReason = 0;
     String e = reasonText(dr);
-    if (e.length() && e != lastErr) { lastErr = e; Serial.printf("Мережа «%s»: %s\n", ssid.c_str(), e.c_str()); }
+    if (e.length() && e != lastErr) { lastErr = e; OUT.printf("Мережа «%s»: %s\n", ssid.c_str(), e.c_str()); }
   } else if (gotIp && lastErr.length()) lastErr = "";
   if (paused) {
-    led(LED_BEAT, LOW);
+    led(LED_BEAT, LED_NOLINK >= 0 ? LOW : (now / 250) % 2);
     led(LED_NOLINK, (now / 250) % 2);
     if ((int32_t)(now - pauseUntil) >= 0) {
       paused = false;
       WiFi.mode(WIFI_STA);
       connect();
       lastLink = now;
-      Serial.println("Перевірка закінчена, Wi-Fi знову ввімкнено");
+      OUT.println("Перевірка закінчена, Wi-Fi знову ввімкнено");
     }
     delay(10);
     return;
@@ -375,7 +505,7 @@ void loop() {
     if (now - lastBeat >= 2000) {
       lastBeat = now;
       char msg[96];
-      snprintf(msg, sizeof msg, "MAYAK1 %s up=%lu rssi=%d ver=%s", macS.c_str(), (unsigned long)(now / 1000), WiFi.RSSI(), FW_VERSION);
+      snprintf(msg, sizeof msg, "MAYAK1 %s up=%lu rssi=%d ver=%s chip=%s", macS.c_str(), (unsigned long)(now / 1000), WiFi.RSSI(), FW_VERSION, CHIP);
       udp.beginPacket(WiFi.gatewayIP(), BRIDGE_PORT);
       udp.write((const uint8_t*)msg, strlen(msg));
       udp.endPacket();
@@ -384,7 +514,8 @@ void loop() {
     if (now - lastBeat > 80) led(LED_BEAT, LOW);
     led(LED_NOLINK, LOW);
   } else {
-    led(LED_BEAT, setupOn ? (now / 500) % 2 == 0 : LOW);
+    if (LED_NOLINK >= 0) led(LED_BEAT, setupOn ? (now / 500) % 2 == 0 : LOW);
+    else led(LED_BEAT, (now / (setupOn ? 150 : 500)) % 2);   // один світлодіод: часто — сторінка налаштування, рідко — шукає мережу
     led(LED_NOLINK, (now / 500) % 2);
     bool phone = setupOn && WiFi.softAPgetStationNum() > 0;   // телефон на сторінці — спроби лише за кнопкою «Під'єднати»
     if (ssid.length() && !phone && now - lastTry > (setupOn ? 60000UL : 30000UL)) connect();

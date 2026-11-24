@@ -247,22 +247,25 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
  <div class="card"><b>Точка доступу для АВР</b>
   <label>Назва</label><input id="f_apSsid" maxlength="32">
   <label>Пароль, 8 і більше символів</label><input id="f_apPass" type="password" placeholder="не змінювати" autocomplete="new-password">
-  <div class="mut">Після зміни назви чи пароля точки АВР треба знову підключити в застосунку eWeLink.</div>
+  <div class="mut">Ця мережа — для АВР, маячків і мосту батареї. Після зміни назви чи пароля АВР треба знову підключити в застосунку eWeLink, а маячки — на їхній сторінці (кнопка BOOT 3 с чи 3 хв без зв'язку).</div>
  </div>
- <div class="card"><b>АВР</b>
-  <label>MAC-адреса АВР</label><input id="f_avrMac" placeholder="aa:bb:cc:dd:ee:ff">
+ <div class="card"><b>АВР чи перемикач</b>
+  <label>Як живлення переходить з міста на генератор і назад</label><select id="f_swMode"><option value="0">Автоматично — АВР (з Wi-Fi чи без)</option><option value="1">Вручну — перемикач «Місто — 0 — Генератор» чи рубильник</option></select>
+  <div class="mut" id="h_swMode"></div>
+  <label>MAC-адреса АВР з Wi-Fi (TOMZN, eWeLink) — якщо є; інакше порожньо, а за містом стежить маячок «Міське світло»</label><input id="f_avrMac" placeholder="aa:bb:cc:dd:ee:ff">
   <label class="ck"><input type="checkbox" id="f_notifyStart"> Повідомляти адміністраторам у Telegram, коли Сторож перезапустився несподівано (збій, сторож, зникало живлення) — з причиною. Після оновлення прошивки й перезапуску зі сторінки не пише</label>
  </div>
  <div class="card" id="bcncard"><b>Маячки</b> <span id="bcncnt" class="mut"></span>
-  <div class="mut" style="margin-top:4px">Маячок — плата ESP32-C3 у розетці: кожні 2 секунди каже Сторожу «я тут» через мережу для АВР. Що означає його мовчання, задає роль:<br>
+  <div class="mut" style="margin-top:4px">Маячок — найпростіша плата ESP (ESP8266: D1 mini, NodeMCU, ESP-01S; ESP32; ESP32-C3, S2, S3, C6) з USB-зарядником у розетці: кожні 2 секунди каже Сторожу «я тут» через мережу Сторожа. Що означає його мовчання, задає роль:<br>
   <b>Генератор</b> — маячок у розетці від генератора: на зв'язку — генератор працює, мовчить — стоїть. Таких можна кілька, про запас.<br>
+  <b>Міське світло</b> — у розетці, що живиться лише від міста (до АВР чи на міській лінії): на зв'язку — міське світло є, мовчить — немає. Можна замість АВР (тоді АВР не потрібен) чи разом з ним: світло є, поки на зв'язку хоч один, — і хибного «Зникло», коли зависає Wi-Fi АВР, не буде.<br>
   <b>Лінія чи фаза</b> — у розетці потрібної лінії (фаза, корпус, котельня): мовчить — на ній немає напруги. У Telegram прийде «🔌» тим, у кого позначено «Маячки».<br>
   <b>Лише показувати</b> — видно тут і в «🛠 Сторож» у боті, повідомлень немає.<br>
   Усі пристрої Сторожа і чи вони на зв'язку — на вкладці «Стан», картка «Пристрої»; маячок, що вже шле «я тут», можна додати звідти кнопкою «Додати маячок».</div>
   <div id="bcnleg" class="msg hide"></div>
   <div id="bcn" style="margin-top:6px"></div>
   <label>Додати маячок за MAC-адресою — якщо його зараз немає на зв'язку (адресу видно в журналі Сторожа й у «🛠 Сторож» у боті)</label>
-  <div class="flex"><input id="b_mac" placeholder="aa:bb:cc:dd:ee:ff" maxlength="17" style="max-width:180px"><input id="b_name" maxlength="24" placeholder="назва, напр. Фаза B" style="min-width:140px"><select id="b_role" style="max-width:170px"><option value="g">Генератор</option><option value="l">Лінія чи фаза</option><option value="v">Лише показувати</option></select><button data-act="bcnadd">Додати</button></div>
+  <div class="flex"><input id="b_mac" placeholder="aa:bb:cc:dd:ee:ff" maxlength="17" style="max-width:180px"><input id="b_name" maxlength="24" placeholder="назва, напр. Фаза B" style="min-width:140px"><select id="b_role" style="max-width:170px"><option value="g">Генератор</option><option value="c">Міське світло</option><option value="l">Лінія чи фаза</option><option value="v">Лише показувати</option></select><button data-act="bcnadd">Додати</button></div>
   <div id="bcnmsg"></div></div>
  <div class="card" id="schset"><b>Графік відключень YASNO</b>
   <label class="ck"><input type="checkbox" id="f_schOn"> Брати графік відключень з YASNO: показувати на сторінці й у боті («🗓 Графік»), попереджати перед відключенням, у повідомленнях писати, за графіком відключення чи ні</label>
@@ -274,11 +277,11 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
   <div style="margin-top:10px"><button data-act="schfetch">Оновити графік зараз</button> <span id="schst" class="mut"></span></div>
   <div class="mut" style="margin-top:6px">Щоб зміни почали діяти, натисніть «Зберегти» внизу сторінки.</div></div>
  <div class="card"><b>Затримки, секунди</b>
-  <label>АВР мовчить (не відповідає) стільки секунд — «міста немає». Рекомендовано 10–15: так повідомлення приходить за 10–15 с після відключення</label><input id="f_offSec" type="number" min="5" max="600">
-  <label>АВР знову в мережі, і це означає «місто є»</label><input id="f_onSec" type="number" min="3" max="300">
+  <label>АВР чи маячок «Міське світло» мовчить стільки секунд — «міста немає». Рекомендовано 10–15: так повідомлення приходить за 10–15 с після відключення</label><input id="f_offSec" type="number" min="5" max="600">
+  <label>АВР чи маячок «Міське світло» знову на зв'язку стільки секунд — «місто є»</label><input id="f_onSec" type="number" min="3" max="300">
   <label>Маячок мовчить, і це означає «генератор зупинився» чи «на лінії немає напруги»</label><input id="f_lineOffSec" type="number" min="5" max="600">
   <label>Маячок на зв'язку, і це означає «генератор працює» чи «на лінії є напруга»</label><input id="f_lineOnSec" type="number" min="3" max="300">
-  <label>Місто є, а генератор ще працює: нагадувати «вимкніть генератор» кожні … хв (0 — лише раз), до 6 разів</label><input id="f_genRemMin" type="number" min="0" max="240">
+  <label>Нагадувати «вимкніть генератор» (місто є, а генератор ще працює) і, з ручним перемикачем, «переключіть» кожні … хв (0 — лише раз), до 6 разів</label><input id="f_genRemMin" type="number" min="0" max="240">
  </div>
  <div class="card"><b>Пароль сторінки</b> <span class="mut">користувач admin</span> <span id="h_adm" class="mut"></span>
   <input id="f_adminPass" type="password" placeholder="не змінювати" autocomplete="new-password" style="margin-top:8px">
@@ -286,7 +289,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
   <div class="mut" id="h_pwBtn"></div></div>
  <div class="card"><button class="p" data-act="save">Зберегти</button> <button data-act="reboot">Перезапустити Сторожа</button><div id="smsg"></div></div>
  <div class="card"><b>Скидання</b>
-  <div class="mut" style="margin-top:6px">«Скинути налаштування» повертає типові: назву об'єкта, затримки, маячок, повідомлення про запуск, щоденний підсумок, сигнали (світлодіоди, стрічка, звук) і вивід кнопки скидання пароля. Wi-Fi роутера, мережа для АВР, сам АВР, бот з одержувачами й пароль сторінки лишаються — Сторож працює далі без перезапуску.</div>
+  <div class="mut" style="margin-top:6px">«Скинути налаштування» повертає типові: назву об'єкта, затримки, маячок, повідомлення про запуск, щоденний підсумок, сигнали (світлодіоди, стрічка, звук) і вивід кнопки скидання пароля. Wi-Fi роутера, мережа для АВР і маячків, сам АВР, вид перемикача, список маячків, бот з одержувачами й пароль сторінки лишаються — Сторож працює далі без перезапуску.</div>
   <div><button data-act="rprefs">Скинути налаштування</button></div>
   <div class="mut" style="margin-top:14px">«Скинути все» — як нова плата, те саме, що BOOT 10 секунд: Сторож забуде Wi-Fi роутера, мережу для АВР, АВР, бота й одержувачів, пароль сторінки, свої звуки. Перед тим одержувачам прийде «Сторожа скинуто до заводських налаштувань». За 10 секунд він перезапуститься й роздаватиме мережу «<b id="r_ap"></b>» з типовим паролем <b id="r_pw"></b>; сторінка — http://10.77.0.1, вхід admin з тим самим паролем. АВР доведеться підключити заново в eWeLink (інструкція, розділ 3). Статистика світла лишиться.</div>
   <label>Щоб скинути все, введіть слово СКИНУТИ</label><div class="flex"><input id="r_word" autocomplete="off" maxlength="20"><button class="d" data-act="rall">Скинути все</button></div>
@@ -338,14 +341,15 @@ function renderDev(d){
  h+='<tr><td><b>Сторож</b>'+sm('цей пристрій')+'</td><td>'+ok('працює')+sm('версія '+esc(d.ver||'')+(d.up!=null?' · працює '+ago(d.up):'')+(d.heap?' · вільно '+Math.round(d.heap/1024)+' КБ':''))+
   '<br><button type="button" data-act="reboot" data-msg="dvmsg" style="margin-top:6px">Перезапустити Сторожа</button></td></tr>';
  h+='<tr><td><b>Роутер</b>'+sm(esc(s.ssid||'не задано')+' · інтернет')+ad(s.bssid||'',null)+'</td><td>'+(s.up?ok('під\'єднано')+sm('сигнал '+s.rssi+' дБм'+(s.pref===false?' · <b class="err">не бажана точка</b>':'')+(s.ip?' · адреса Сторожа '+esc(s.ip):'')):bad('немає зв\'язку'))+'</td></tr>';
- if(!w.avr.assigned)h+='<tr><td><b>АВР</b></td><td>'+bad('не прив\'язано')+sm('підключіть АВР у застосунку eWeLink до точки «'+esc(n.ap.ssid)+'» і натисніть «Це АВР» у його рядку нижче')+'</td></tr>';
+ const cityB=w.city&&w.city.bcn;
+ if(!w.avr.assigned)h+='<tr><td><b>АВР</b></td><td>'+(cityB?sm('не прив\'язано — місто визначає маячок «Міське світло»'):bad('не прив\'язано')+sm('підключіть АВР у застосунку eWeLink до точки «'+esc(n.ap.ssid)+'» і натисніть «Це АВР» у його рядку нижче — чи додайте маячок з роллю «Міське світло»'))+'</td></tr>';
  else{const x=C[avr];let st;nb++;
   if(x&&x.assoc){on++;st=x.ping!=null&&x.ping<=10?ok('на зв\'язку')+sm('у мережі, відповідає на ping · '+sg(x)):gr('у мережі, на ping не відповідає')+sm(sg(x))}
   else st=bad('не на зв\'язку')+sm((x?'від\'єднався '+ago(x.seen)+' тому':'не під\'єднувався від запуску Сторожа')+(w.grid.st===0?' · міського світла немає'+(w.grid.exact?' з '+esc(w.grid.at):''):''));
   if(isY(x))st+=sm('<b class="err">це пристрій, з якого відкрито сторінку, — не АВР</b>');
   else if(isR(avr))st+=sm('<b class="err">адреса схожа на телефон чи комп\'ютер, а не на АВР</b>');
   h+='<tr><td><b>АВР</b>'+sm('прив\'язано')+ad(avr,x)+'</td><td>'+st+'</td></tr>'}
- const RN={g:'генератор',l:'лінія чи фаза',v:'лише показувати'};
+ const RN={g:'генератор',c:'міське світло',l:'лінія чи фаза',v:'лише показувати'};
  for(const b of BL){if(!b.cfg)continue;nb++;const x=C[b.mac];
   const st=b.seen&&b.alive?(on++,ok('на зв\'язку')+sm('вістка '+ago(b.ago)+' тому · '+b.rssi+' дБм'+(b.ver?' · версія '+esc(b.ver):''))):
    b.seen?bad('мовчить')+sm('востаннє '+ago(b.ago)+' тому'):bad('не на зв\'язку')+sm('не озивався від запуску Сторожа');
@@ -377,7 +381,7 @@ function renderDev(d){
  const aY=w.avr.assigned&&isY(C[avr]);
  $('clhint').textContent=aY?'АВР-ом зараз призначено пристрій, з якого відкрито цю сторінку. Справжній АВР з\'явиться окремим рядком, коли його підключать у застосунку eWeLink до точки «'+n.ap.ssid+'».':
   !w.avr.assigned&&unk===1?'У мережі Сторожа один невідомий пристрій. Якщо АВР щойно підключали в eWeLink, це він: натисніть «Це АВР».':
-  (!w.avr.assigned&&!unk?'Підключіть АВР у застосунку eWeLink до точки «'+n.ap.ssid+'».':
+  (!w.avr.assigned&&!unk?(w.city&&w.city.bcn?'':'Підключіть АВР у застосунку eWeLink до точки «'+n.ap.ssid+'» чи додайте маячок з роллю «Міське світло».'):
   oth?'АВР вже прив\'язано ('+avr+'). «Це новий АВР» — лише якщо АВР замінили: тоді Сторож стежитиме за новим, а не за старим.':'');
 }
 function render(d){
@@ -385,9 +389,10 @@ function render(d){
  $('obj').textContent='· '+w.obj;
  $('status').textContent=w.status.charAt(0).toUpperCase()+w.status.slice(1);
  $('dot').className='dot '+(g===1?(le&&l===1?'gen':'on'):g===0?(le&&l===1?'gen':'off'):'');
- $('since').textContent=w.avr.assigned&&g>=0?sinceT(w.grid):'';
+ const cset=w.city?w.city.set:w.avr.assigned;
+ $('since').textContent=cset&&g>=0?sinceT(w.grid):'';
  let r='';const row=(a,b)=>{r+='<div class="row"><span>'+a+'</span><span>'+b+'</span></div>'};
- row('Місто: АВР на зв\'язку',!w.avr.assigned?'АВР не призначено':g===1?'є':g===0?'немає':'визначається');
+ row(w.avr.assigned?(w.city&&w.city.bcn?'Місто: АВР чи маячок на зв\'язку':'Місто: АВР на зв\'язку'):'Місто: маячок на зв\'язку',!cset?'не задано АВР чи маячок «Міське світло»':g===1?'є':g===0?'немає':'визначається');
  const st2=d.stats||{};if(st2.ok)row('Сьогодні','🟢 '+hrs(st2.on)+' · 🔴 '+hrs(st2.off)+' · відключень '+st2.outs);
  if(st2.text)$('sttext').textContent=st2.text;
  if(le)row('Генератор: маячок',l===1?(g===1?'<b class="err">ще працює — вимкніть</b>':'працює'):l===0?'не працює':'визначається');
@@ -490,11 +495,12 @@ function renderSch(s){if(!s)return;const set='<button data-act="gosch" style="ma
  $('schinfo').textContent=info;$('schst').textContent=s.have?'Отримано '+ago(s.ago)+' тому':(s.err?'Помилка: '+s.err:'Ще не отримано')}
 //  Маячки (1.0.23): таблиця в «Налаштуваннях». Рядки перебудовуються, лише коли змінився список і ніхто не пише в поле;
 //  стан (на зв'язку, сигнал) оновлюється кожні 3 с.
-const ROLE={g:'Генератор',l:'Лінія чи фаза',v:'Лише показувати'};let bcnSig='',bcnList=[];
+const ROLE={g:'Генератор',c:'Міське світло',l:'Лінія чи фаза',v:'Лише показувати'};let bcnSig='',bcnList=[];
 function bid(m){return m.replace(/:/g,'')}
 function bcnStat(b,w){let s=b.seen?(b.alive?'на зв\'язку · '+b.rssi+' дБм · працює '+ago(b.up):'мовчить '+ago(b.ago)):'не чув від запуску Сторожа';
  if(b.cfg&&b.role==='l'&&b.t)s=(b.t.st===1?'<b>є напруга</b>':b.t.st===0?'<b class="err">немає напруги</b>':'визначається')+' · '+s;
  if(b.cfg&&b.role==='g')s=(w.line.st===1?'<b>генератор працює</b>':w.line.st===0?'генератор стоїть':'визначається')+' · '+s;
+ if(b.cfg&&b.role==='c')s=(b.alive?'<b>місто є</b>':'<b class="err">мовчить — міста немає?</b>')+' · '+s;
  return s+(b.ver?' · прошивка '+esc(b.ver):'')}
 function renderBcn(w,force){const c0=w.bcn||{list:[]},B=c0.list||[],sig=JSON.stringify(B.map(b=>[b.mac,b.cfg,b.role,b.name]));bcnList=B;
  const ae=document.activeElement,ed=ae&&$('bcn').contains(ae)&&ae.tagName!=='BUTTON';
@@ -517,10 +523,13 @@ let curSet=null,annAll=0;
 $('a_to').addEventListener('change',()=>$('a_who').classList.toggle('hide',$('a_to').value!=='sel'));
 //  1.0.47: значок перед назвою об'єкта — швидкий вибір і як виглядатиме другий рядок повідомлення
 const ICONS=['📍','🏢','🏠','🏫','🏪','🏭','🏥','⛪','⚡'];
+//  1.0.57: ручний перемикач — що Сторож скаже й звідки знає положення
+function swHint(){$('h_swMode').innerHTML=$('f_swMode').value==='1'?'Коли міське світло зникне чи повернеться, а генератор запустять чи зупинять, у Telegram прийде, на що переключити перемикач і коли вимкнути генератор. Що перемикач справді переключили, Сторож бачить за маячком з роллю «Лінія чи фаза» в розетці <b>після</b> перемикача: доки на лінії немає напруги, нагадує «переключіть» (кожні … хв, як нижче, до 6 разів). Генератор — маячок «Генератор» у розетці від генератора; місто — АВР з Wi-Fi або маячок «Міське світло» в розетці до перемикача.':'АВР переключає сам. З АВР без Wi-Fi за містом стежить маячок «Міське світло» в розетці до АВР, за генератором — маячок «Генератор».'}
+$('f_swMode').addEventListener('change',swHint);
 function icoPrev(){const i=$('f_objIco').value.trim(),n=$('f_obj').value.trim()||"Об'єкт";$('icoprev').textContent=(i?i+' ':'')+n+' · о 14:02'}
 async function loadSet(){
  try{const s=await j('/api/settings');curSet=s;
-  for(const k of ['obj','objIco','staSsid','staBssid','apSsid','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin'])$('f_'+k).value=s[k]==null?'':s[k];
+  for(const k of ['obj','objIco','staSsid','staBssid','apSsid','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin','swMode'])$('f_'+k).value=s[k]==null?'':s[k];swHint();
   icoPrev();
   $('f_mdnsOn').checked=!!s.mdnsOn;
   $('f_notifyStart').checked=s.notifyStart;bcnReload();
@@ -554,7 +563,7 @@ async function loadTg(){
 }
 async function save(){
  const p=new URLSearchParams();
- for(const k of ['obj','objIco','staSsid','staBssid','staPass','apSsid','apPass','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin','adminPass'])p.append(k,$('f_'+k).value);
+ for(const k of ['obj','objIco','staSsid','staBssid','staPass','apSsid','apPass','avrMac','offSec','onSec','lineOffSec','lineOnSec','genRemMin','swMode','adminPass'])p.append(k,$('f_'+k).value);
  p.append('mdnsOn',$('f_mdnsOn').checked?'1':'0');
  p.append('notifyStart',$('f_notifyStart').checked?'1':'0');p.append('pwBtn',$('f_pwBtn').value);
  p.append('schOn',$('f_schOn').checked?'1':'0');p.append('schTom',$('f_schTom').checked?'1':'0');p.append('schDso',$('f_schDso').value);p.append('schQueue',$('f_schQueue').value);p.append('schWarn',$('f_schWarn').value);

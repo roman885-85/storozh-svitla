@@ -101,7 +101,7 @@ static void run(int64_t untilSec) {
       if (b.on && T - b.last >= 2000000) {
         b.last = T;
         char t[96];
-        snprintf(t, sizeof t, "MAYAK1 %s up=%lld rssi=-60 ver=1.0.17", macToStr(b.mac).c_str(), (long long)(T / 1000000));
+        snprintf(t, sizeof t, "MAYAK1 %s up=%lld rssi=-60 ver=%s", macToStr(b.mac).c_str(), (long long)(T / 1000000), (b.ip & 1) ? "1.1.0 chip=ESP8266" : "1.0.17");   // 1.1.0: chip= у кінці
         g_pkts.push_back({T, IPAddress(10, 77, 0, b.ip), t});
       }
     watchLoop();
@@ -412,6 +412,112 @@ int main() {
   size_t bcnAfter = 0; for (auto& b : bs) if (b.used) bcnAfter++;
   bool noBeaconLog = true; for (size_t k = logs23; k < g_log.size(); k++) if (has(g_log[k], "80:65:99:88:65:2")) noBeaconLog = false;
   check(g_bmsPkts == 1 && bcnAfter == bcn23 && noBeaconLog, "один пакет — до батареї; маячків не додалось; чужа мережа — відкинуто");
+
+  puts("24) 1.0.57: маячок «Міське світло» замість АВР");
+  S.avrMac = "";
+  S.beacons = "10:20:30:40:50:20 g Генератор\n80:65:99:77:77:01 c Місто";
+  watchReload();
+  check(nbc == 2 && bc[1].role == 'c' && citySet() && !avrAssigned(), "роль «c» читається; за містом стежимо без АВР");
+  sim("80:65:99:77:77:01", 41);
+  size_t ci = sims.size() - 1;                     // (вектор виріс — старі посилання далі не вживаємо)
+  for (auto& b : sims) b.on = false;
+  sims[ci].on = true;
+  run(T / 1000000 + 30);
+  v = since();
+  bool back24 = false; for (auto& x : v) if (has(x.text, "Міське світло повернулось")) back24 = true;
+  check(grid.st == T_ON && watchGrid() == 1 && back24, "маячок на зв'язку — «Міське світло повернулось», місто є");
+  int64_t t24 = T, off24 = 0;
+  sims[ci].on = false;
+  for (int k = 0; k < 60 && !off24; k++) { run(T / 1000000 + 1); if (grid.st == T_OFF) off24 = T; }
+  run(T / 1000000 + 20);
+  v = since();
+  int lost24 = 0; for (auto& x : v) if (has(x.text, "Зникло міське світло")) lost24++;
+  printf("    «немає» через %lld с після вимкнення маячка\n", (long long)((off24 - t24) / 1000000));
+  check(off24 && (off24 - t24) / 1000000 <= 15 && lost24 == 1, "маячок замовк — «Зникло» за ≤ 15 с, один раз");
+  bool why24 = false; for (auto& l : g_log) if (has(l, "маячок міста мовчить")) why24 = true;
+  check(why24, "у журналі — «маячок міста мовчить»");
+  sims[ci].on = true;
+  run(T / 1000000 + 30);
+  check(grid.st == T_ON, "маячок знову на зв'язку — місто є");
+  String bt24 = watchBeaconsText();
+  check(has(bt24.s, "Місто (місто): на зв'язку"), "«🛠 Сторож»: роль «місто»");
+
+  puts("25) АВР і маячок «Міське світло» разом: Wi-Fi АВР завис — «Зникло» немає");
+  S.avrMac = "10:20:30:40:50:73"; watchReload();
+  avrGlitch = false; avrUp = true; avrUpAt = T;
+  run(T / 1000000 + 30);
+  since();
+  check(grid.st == T_ON && citySet(), "АВР і маячок на зв'язку — місто є");
+  avrGlitch = true; avrLeftAlive = true; avrProbing = false; probeOnce = false; glitchAt = T; glitchLastPing = T;
+  run(T / 1000000 + 120);
+  v = since();
+  bool lost25 = false; for (auto& x : v) if (has(x.text, "Зникло")) lost25 = true;
+  check(grid.st == T_ON && !lost25, "АВР 2 хв поза мережею, маячок на зв'язку — місто є, «Зникло» немає");
+  int64_t t25 = T, off25 = 0;
+  sims[ci].on = false;
+  for (int k = 0; k < 60 && !off25; k++) { run(T / 1000000 + 1); if (grid.st == T_OFF) off25 = T; }
+  check(off25 && (off25 - t25) / 1000000 <= 15, "замовк і маячок — «немає» за ≤ 15 с від останнього свідка");
+  avrGlitch = false;
+
+  puts("26) 1.0.57: лише маячки й ручний перемикач «Місто — 0 — Генератор»");
+  S.avrMac = ""; S.swMode = 1;
+  S.beacons = "10:20:30:40:50:20 g Генератор\n80:65:99:77:77:01 c Місто\n80:65:99:11:22:33 l Щит після перемикача";
+  watchReload();
+  for (auto& b : sims) b.on = false;
+  sims[ci].on = true; sims[1].on = true;            // місто є, перемикач на «Місто», генератор стоїть
+  run(T / 1000000 + 60);
+  v = since();
+  bool noSw0 = true; for (auto& x : v) if (has(x.text, "ерекл")) noSw0 = false;
+  check(noSw0, "місто й лінія повернулись разом — без «переключіть»");
+  check(grid.st == T_ON && loadOn() && !genOn() && swWant() == 'c', "місто є, на лінії напруга, генератор стоїть");
+  sims[ci].on = false; sims[1].on = false;          // зникло місто — лінія після перемикача теж
+  run(T / 1000000 + 40);
+  v = since();
+  bool lost26 = false; for (auto& x : v) if (has(x.text, "Зникло міське світло") && has(x.text, "Запустіть генератор і переключіть перемикач на «Генератор»")) lost26 = true;
+  check(lost26, "«Зникло міське світло» — «Запустіть генератор і переключіть перемикач на «Генератор»»");
+  sims[0].on = true;                                // запустили генератор, перемикач ще на «Місто»
+  run(T / 1000000 + 30);
+  v = since();
+  bool gen26 = false; for (auto& x : v) if (has(x.text, "Працює генератор") && has(x.text, "Переключіть перемикач на «Генератор»")) gen26 = true;
+  check(gen26 && genOn(), "«Працює генератор» — «Переключіть перемикач на «Генератор»»");
+  check(has(statusShort().s, "переключіть на генератор"), "стан: «… переключіть на генератор»");
+  run(T / 1000000 + 13 * 60);
+  v = since();
+  int rem26 = 0; for (auto& x : v) if (has(x.text, "🔁 <b>Переключіть перемикач на «Генератор»</b>") || (has(x.text, "Переключіть перемикач на «Генератор»") && has(x.text, "на лінії напруги немає"))) rem26++;
+  check(rem26 == 2, "за 13 хв — «🔁 Переключіть перемикач на «Генератор»» за 2 хв і ще раз за 10");
+  sims[1].on = true;                                // переключили
+  run(T / 1000000 + 30);
+  v = since();
+  bool sw26 = false; for (auto& x : v) if (has(x.text, "Напруга на лінії є") && has(x.text, "Живлення від генератора")) sw26 = true;
+  check(sw26, "переключили — «🔌 Напруга на лінії є» · «Живлення від генератора»");
+  run(T / 1000000 + 25 * 60);
+  v = since();
+  bool more26 = false; for (auto& x : v) if (has(x.text, "Переключіть")) more26 = true;
+  check(!more26, "далі 25 хв — жодного «Переключіть»");
+  sims[ci].on = true;                               // повернулось місто
+  run(T / 1000000 + 30);
+  v = since();
+  bool back26 = false; for (auto& x : v) if (has(x.text, "Міське світло повернулось") && has(x.text, "Переключіть перемикач на «Місто» і вимкніть генератор")) back26 = true;
+  check(back26, "«Повернулось» — «Переключіть перемикач на «Місто» і вимкніть генератор»");
+  sims[0].on = false;                               // переключили на місто (лінія без перерви довше за 15 с) і вимкнули генератор
+  run(T / 1000000 + 60);
+  v = since();
+  bool off26 = false, sw2 = false; for (auto& x : v) { if (has(x.text, "Генератор вимкнено")) off26 = true; if (has(x.text, "Переключіть")) sw2 = true; }
+  check(off26 && !sw2 && swWant() == 'c' && loadOn(), "«Генератор вимкнено» без «Переключіть» — на лінії напруга від міста");
+  sims[1].on = false;                               // хтось поставив «0»: місто є, лінія без напруги
+  run(T / 1000000 + 13 * 60);
+  v = since();
+  int rem2 = 0; for (auto& x : v) if (has(x.text, "Переключіть перемикач на «Місто»")) rem2++;
+  check(rem2 == 2, "перемикач на «0» — «🔁 Переключіть перемикач на «Місто»» за 2 хв і ще раз за 10");
+  sims[1].on = true;
+  run(T / 1000000 + 30);
+  since();
+  S.swMode = 0;                                     // автоматичний: «переключіть» не буває
+  sims[ci].on = false; sims[1].on = false;
+  run(T / 1000000 + 40);
+  v = since();
+  bool auto26 = false, autoSw = false; for (auto& x : v) { if (has(x.text, "Зникло міське світло")) auto26 = true; if (has(x.text, "ерекл")) autoSw = true; }
+  check(auto26 && !autoSw, "АВР (автоматично): «Зникло» без «переключіть»");
 
   printf("\n%s: %d помилок\n", fails ? "НЕ ПРОЙДЕНО" : "УСЕ ПРОЙДЕНО", fails);
   return fails ? 1 : 0;

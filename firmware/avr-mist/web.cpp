@@ -625,7 +625,7 @@ static void hSettingsGet() {
              ",\"apSsid\":\"" + jsonEsc(S.apSsid) + "\",\"tgTokenSet\":" + b(S.tgToken.length()) + ",\"tgTokenHint\":\"" + jsonEsc(hint) +
              "\",\"tgChats\":\"" + jsonEsc(S.tgChats) + "\",\"avrMac\":\"" + jsonEsc(S.avrMac) + "\",\"mayakOn\":" + b(S.mayakOn) + ",\"mdnsOn\":" + b(S.mdnsOn) +
              ",\"notifyStart\":" + b(S.notifyStart) + ",\"offSec\":" + String(S.offSec) + ",\"onSec\":" + String(S.onSec) +
-             ",\"lineOffSec\":" + String(S.lineOffSec) + ",\"lineOnSec\":" + String(S.lineOnSec) + ",\"lineWarnSec\":" + String(S.lineWarnSec) + ",\"genRemMin\":" + String(S.genRemMin) +
+             ",\"lineOffSec\":" + String(S.lineOffSec) + ",\"lineOnSec\":" + String(S.lineOnSec) + ",\"lineWarnSec\":" + String(S.lineWarnSec) + ",\"genRemMin\":" + String(S.genRemMin) + ",\"swMode\":" + String(S.swMode) +
              ",\"sumOn\":" + b(S.sumOn) + ",\"sumHour\":" + String(S.sumHour) +
              ",\"adminDefault\":" + b(S.adminPass == defaultPass()) + ",\"pwBtn\":" + String(S.pwBtn) +
              ",\"defPass\":\"" + jsonEsc(defaultPass()) + "\",\"defAp\":\"" + jsonEsc(defaultApSsid()) + "\"" +
@@ -701,6 +701,7 @@ static void hSettingsPost() {
     n.tgNightFrom = (uint8_t)a;
     n.tgNightTo = (uint8_t)z;
   }
+  if (srv.hasArg("swMode")) { long v = srv.arg("swMode").toInt(); if (v < 0 || v > 1) return fail("Перемикач — виберіть зі списку"); n.swMode = (uint8_t)v; }
   if (srv.hasArg("genRemMin")) { long v = srv.arg("genRemMin").toInt(); if (v < 0 || v > 240) return fail("Нагадування про генератор — від 0 до 240 хв"); n.genRemMin = (uint16_t)v; }
   if (srv.hasArg("pwBtn")) {
     long v = srv.arg("pwBtn").toInt();

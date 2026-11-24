@@ -4,9 +4,11 @@
 [Battery bridge wiring (PDF)](docs/СХЕМИ-МОСТУ.pdf) ·
 [Releases — ready-to-flash files](https://github.com/roman885-85/storozh-svitla-esp32-power-outage-telegram/releases/latest)
 
-**Telegram notifications when mains power goes off and comes back — for any building with a TOMZN / eWeLink automatic
-transfer switch (ATS), without a single wire to the ATS.** An ESP32 becomes a separate Wi-Fi network for the ATS and knows
-whether mains power is present from whether the ATS is on that network. Optional: a generator, individual phases and
+**Telegram notifications when mains power goes off and comes back — for any building, without a single wire to the
+switchboard.** An ESP32 provides its own Wi-Fi network and knows whether mains power is present from whether a mains
+witness is online: a Wi-Fi automatic transfer switch (ATS, TOMZN / eWeLink) or a **beacon** — the cheapest ESP board
+(ESP8266, ESP32, ESP32-C3…) on a USB charger in a mains-only outlet. So it also works with an ATS without Wi-Fi and with a
+**manual changeover switch** ("Mains — 0 — Generator"): Storozh then tells people when and where to switch. Optional: a generator, individual phases and
 lines, a battery with a JK BMS, the YASNO outage schedule (Ukraine), and on-site lights, sound and a display. The user
 interface and documentation are in Ukrainian.
 
@@ -24,9 +26,12 @@ interface and documentation are in Ukrainian.
 
 What it can watch:
 
-- **Mains power** — the core: Storozh plus a TOMZN TOQ7E ATS. Instead of the ATS, any Wi-Fi device powered from mains
-  only (a smart plug or relay on a mains-only outlet) works the same way — Storozh pings it every second.
-- **Generator** — an ESP32-C3 "beacon" plugged into the generator's outlet: running, stopped, "turn it off — mains is back".
+- **Mains power** — the core: Storozh plus a "mains" beacon in a mains-only outlet **or** a TOMZN TOQ7E Wi-Fi ATS (or
+  any Wi-Fi device powered from mains only — a smart plug or relay). Both together are more reliable: a hung ATS Wi-Fi
+  no longer causes a false "power lost".
+- **Generator** — a beacon plugged into the generator's outlet: running, stopped, "turn it off — mains is back".
+- **Manual changeover switch** or a knife switch: "start the generator and switch to Generator", "switch to Mains and stop
+  the generator"; with a line beacon after the switch — reminders until someone actually switches.
 - **Phases and individual lines** — a beacon on each phase or line: on a three-phase input the ATS only sees its own phase.
 - **Battery and inverter** — a battery with a JK BMS plus an ESP32-C3 battery bridge: charge, time left, BMS alarms; up to
   4 BMS per bridge (polled in turn), lights and a buzzer right next to the battery.
@@ -38,12 +43,13 @@ Several buildings — one Storozh per building, each with its own bot.
 
 ## How it works
 
-The TOMZN TOQ7E ATS (eWeLink app) powers its Wi-Fi from the **mains** input only. Storozh — an ESP32 WROOM board —
-joins the building's router and provides **its own** network for the ATS (and beacons), with NAT, so eWeLink keeps
-working. ATS on Storozh's network and answering — mains is on; off the network or silent for 12 s — mains is off; back
-online for 10 s — on. No guessing, and messages carry the real moment of the event.
+Storozh — an ESP32 WROOM board — joins the building's router and provides **its own** network for the ATS and beacons,
+with NAT, so the eWeLink app keeps working. A **beacon** is the simplest ESP board in an outlet: it says "I'm here" every
+2 s; silence means no voltage there. The TOMZN TOQ7E ATS powers its Wi-Fi from the **mains** input only, and a "mains"
+beacon sits in a mains-only outlet. One rule: the mains witness online — mains is on; silent for 12 s — off; back online
+for 10 s — on. No guessing, and messages carry the real moment of the event.
 
-A **beacon** is an optional ESP32-C3 plugged into an outlet: it says "I'm here" every 2 s; silence means no voltage there.
+Beacons run on ESP8266 (Wemos D1 mini, NodeMCU, ESP-01S), ESP32, ESP32-C3, S2, S3, C6 — one program, a file per chip.
 A **battery bridge** is an optional ESP32-C3 next to a battery with a **JK BMS**: it keeps a permanent Bluetooth
 connection to the BMS (or polls up to 4 BMS in turn every 1–30 min, so each beeps once per period) and passes charge,
 voltage, current, cells, temperatures and alarms to Storozh every 5 s. Storozh never connects or writes to the BMS.
@@ -57,8 +63,9 @@ voltage, current, cells, temperatures and alarms to Storozh every 5 s. Storozh n
    characters of the board's MAC address), open http://10.77.0.1, user admin.
 3. Settings: object name and its icon in messages, router Wi-Fi, your own page and access point passwords — Save. Reserve a fixed address for
    Storozh in the router.
-4. While mains is on, connect the ATS to "AVR-mist-XXXX" in the eWeLink app and press "Це АВР" ("this is the ATS") in the
-   "Пристрої" (devices) card.
+4. Mains witness: a Wi-Fi ATS — while mains is on, connect it to "AVR-mist-XXXX" in the eWeLink app and press "Це АВР"
+   ("this is the ATS") in the "Пристрої" (devices) card; without one — a "Міське світло" (mains) beacon. A manual switch
+   — Settings → "АВР чи перемикач" → "Вручну" (manual).
 5. Create a bot with @BotFather, paste the token on the "Сповіщення" (notifications) tab, add yourself and others.
 6. Optionally — beacons, the YASNO schedule, signals, a display, a battery.
 
@@ -107,9 +114,11 @@ Step by step with every setting — the [manual (Ukrainian)](docs/ІНСТРУК
 
 - An **ESP32 WROOM** board (DevKit V1, 30 pins) and a 5 V USB supply — **from the router's UPS**, so Storozh keeps
   working during an outage.
-- A **TOMZN TOQ7E** ATS (eWeLink) — or another Wi-Fi device powered from mains only that answers ping.
+- A "mains" beacon (any ESP board plus a USB charger) **or** a **TOMZN TOQ7E** ATS (eWeLink) — or another Wi-Fi device
+  powered from mains only that answers ping.
 - A router with internet (2.4 GHz Wi-Fi) and a Telegram bot (token from @BotFather — step by step on Storozh's page).
-- Optional: **ESP32-C3** boards for beacons and the battery bridge (a battery with a Bluetooth **JK BMS**; bridge
+- Optional: beacons — **ESP8266** (D1 mini, NodeMCU, ESP-01S), **ESP32**, **ESP32-C3**, S2, S3, C6; an **ESP32-C3**
+  for the battery bridge (a battery with a Bluetooth **JK BMS**; bridge
   display — Open-Smart 1.8" ST7567); a **Nokia 5110** display (PCD8544, 3.3 V); a **WS2812B** strip or two LEDs; an
   active/passive buzzer or a speaker with a **PAM8403** amplifier; a password-reset button.
 
@@ -117,13 +126,13 @@ Step by step with every setting — the [manual (Ukrainian)](docs/ІНСТРУК
 
 On any system — **Windows, Linux, macOS**: you need Python 3.8+ and
 [`arduino-cli`](https://arduino.github.io/arduino-cli/latest/installation/); the script installs the Arduino-ESP32
-**3.3.3** core itself (partition scheme `min_spiffs`), esptool comes with it.
+**3.3.3** (partition scheme `min_spiffs`) and ESP8266 **3.1.2** cores itself, esptool comes with them.
 
-    python3 tools/build.py --setup        # once: the esp32 3.3.3 core
+    python3 tools/build.py --setup        # once: the esp32 3.3.3 and esp8266 3.1.2 cores
     python3 tools/build.py                # all firmwares → build/ (Storozh, beacon, battery bridge; or mist, mayak, bms)
     python3 -m pip install pyserial       # for flashing over USB
     python3 tools/flash.py mist --new     # first flash of Storozh (erases flash, adds the MAC to tools/devices.txt)
-    python3 tools/flash.py mayak --new    # ESP32-C3 beacon
+    python3 tools/flash.py mayak --new    # beacon: ESP8266, ESP32, C3, S2, S3, C6 — image chosen by chip
     python3 tools/flash.py bms --new      # ESP32-C3 battery bridge
 
 On Windows: `py tools\build.py`, `py tools\flash.py …`. The port is found automatically (COM…, /dev/ttyUSB…, /dev/cu.…);
