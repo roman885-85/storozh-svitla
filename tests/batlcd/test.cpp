@@ -98,6 +98,20 @@ int main() {
   v.soc = 100; batRender(c, v);
   expect(!memcmp(a.fb, c.fb, sizeof a.fb), "кадр залежить лише від даних (100 → 9 → 100 — той самий)");
 
+  // 9. Кілька батарей «по черзі» (1.2.0): назва власника під «батарейкою» чи «2 з 3»; без даних — котра, у рядку комірок
+  v = BatView(); v.link = 2; v.has = true; v.soc = 76; v.mv = 53120; v.ma = -8400; v.leftMin = 310; v.n = 16; v.lo = 3318; v.hi = 3322;
+  v.rBms = 3; v.rWifi = 4; v.idx = 0; v.count = 2; v.label = "Інвертор";
+  batRender(f, v); save(f, "10-kilka-nazva");
+  expect(BatFb::len("Інверто") == 7, "назва обрізана до 7 знаків");
+  v.idx = 1; v.count = 3; v.label = ""; v.soc = 41; v.ma = 2600; v.leftMin = 140;
+  batRender(f, v); save(f, "10b-kilka-nomer");
+  v = BatView(); v.link = 6; v.has = true; v.soc = 55; v.ageMin = 7; v.idx = 1; v.count = 2; v.label = "Гараж"; v.rWifi = 4;
+  batRender(f, v); save(f, "10c-kilka-ne-chuty");
+  v.link = 5; v.has = false; v.label = "";
+  batRender(f, v); save(f, "10d-kilka-cherha");
+  v.link = 7; v.has = true; v.label = "Дуже довга назва"; v.idx = 3; v.count = 4;
+  batRender(f, v); save(f, "10e-kilka-ne-vidpovila");
+
   {
     const int S = 3, B = 3, G = 4, cols = 3, rows = (int)(sheet.size() + cols - 1) / cols;
     int cw = (BatFb::W + 2 * B) * S, ch = (BatFb::H + 2 * B) * S, W = cols * cw + (cols + 1) * G * S, H = rows * ch + (rows + 1) * G * S;

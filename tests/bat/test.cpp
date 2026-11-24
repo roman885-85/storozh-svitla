@@ -70,11 +70,43 @@ static void run(int64_t sec) {                   // крок — 1 с, міст 
   }
 }
 static void reset() {                            // новий запуск Сторожа: стан bms.cpp з нуля
-  B = Bat(); avgMa = 0; avgUs = 0; socInit = false;
-  for (bool& a : socArmed) a = false;
-  rtArmed[0] = rtArmed[1] = true; rtBelow[0] = rtBelow[1] = 0;
-  errShown = errCand = 0; errCandUs = 0; lostSaid = false; logOk = false; okSince = badSince = 0; loopUs = 0;
+  resetAll();
   T = 0; sim = Sim(); g_tg.clear(); g_log.clear();
+}
+
+// --- 1.0.48: міст 1.2.0 «по черзі» — кілька батарей, кожна своїм пакетом (bi, bn, per, lbl) ---
+struct Pk { bool on = true; int soc = 70; long ma = -8000; int st = 2; int64_t polled = -1; unsigned long err = 0; };
+struct Sim2 { bool on = true; int bn = 2, per = 300; Pk p[4]; int64_t lastPkt = -10000000; } s2;
+static const char* const LBL[4] = {"Інвертор", "Гараж", "", "Склад_2"};
+static const char* const BMAC[4] = {"c8:47:80:00:00:02", "c8:47:80:00:00:03", "c8:47:80:00:00:03", "c8:47:80:00:00:04"};
+static void pkt2(int k) {
+  Pk& q = s2.p[k];
+  char b[760];
+  snprintf(b, sizeof b, "BMS1 10:20:30:40:50:20 up=%lld rssi=-58 ver=1.2.0 st=%d rc=0 bad=0 heap=150000 lcd=0 rst=1 bi=%d bn=%d per=%d pl=5 pf=1%s%s bmac=%s name=JK_B2A8S20P brssi=-70",
+           (long long)(T / 1000000), q.st, k, s2.bn, s2.per, LBL[k][0] && s2.per ? " lbl=" : "", s2.per ? LBL[k] : "", BMAC[k]);   // назву міст шле лише «по черзі»
+  std::string s = b;
+  if (q.polled >= 0) {
+    snprintf(b, sizeof b, " age=%lld fmt=32 soc=%d v=53100 i=%ld rem=100000 full=280000 cyc=3 soh=100 n=16 lo=3318 lox=1 hi=3322 hix=2 err=%lx chg=1 dis=1 bal=0 heat=0 c=3318,3322,3320",
+             (long long)((T - q.polled) / 1000000), q.soc, q.ma, q.err);
+    s += b;
+  }
+  std::vector<char> buf(s.begin(), s.end());
+  buf.push_back(0);
+  bmsPacket(buf.data(), 0);
+}
+static void run2(int64_t sec) {                  // міст опитує кожну раз на per с (якщо BMS є), шле всі кожні 5 с
+  int64_t until = T + sec * 1000000LL;
+  while (T < until) {
+    T += 1000000;
+    for (int k = 0; k < s2.bn; k++) {
+      Pk& q = s2.p[k];
+      bool due = q.polled < 0 || T - q.polled >= (int64_t)s2.per * 1000000LL;
+      if (q.on && due) { q.polled = T; q.st = 2; }
+      else if (!q.on && due) q.st = 6;
+    }
+    if (s2.on && T - s2.lastPkt >= 5000000) { s2.lastPkt = T; for (int k = 0; k < s2.bn; k++) pkt2(k); }
+    bmsLoop();
+  }
 }
 
 static int fails = 0;
@@ -212,7 +244,55 @@ int main() {
   for (const char* g : {"BMS1", "BMS1 ", "BMS1 zz:zz", "BMS1 10:20:30:40:50:20 soc", "BMS1 10:20:30:40:50:20 =5 soc=150 age=1 c=,,,", "MAYAK1 x"}) {
     std::string s = g; std::vector<char> b(s.begin(), s.end()); b.push_back(0); bmsPacket(b.data(), 0);
   }
-  check(B.seen && B.soc == 100 && B.nc <= 32, "лише справжній MAC прийнято; заряд обрізано до 100 %");
+  check(Br.seen && P[0].soc == 100 && P[0].nc <= 32, "лише справжній MAC прийнято; заряд обрізано до 100 %");
+
+  puts("15) Міст 1.2.0 «по черзі»: дві батареї з назвами, кожна окремо (1.0.48)");
+  reset(); mark = 0; S.bmsOn = true; gridState = 0; s2 = Sim2(); s2.p[1].soc = 33;
+  run2(60);
+  check(since().empty(), "першу хвилину — тиша");
+  check(P[0].used && P[1].used && !P[2].used && Br.bn == 2 && Br.per == 300, "дві батареї, по черзі раз на 5 хв");
+  check(has(bmsStatusLine().s, "🔋 Батарея 1 «Інвертор» 70 % · 53,1 В · розряд 8,0 А") && has(bmsStatusLine().s, "🔋 Батарея 2 «Гараж» 33 %"),
+        "«📊 Стан»: обидві, з назвами");
+  check(has(bmsDiagLine().s, "по черзі раз на 5 хв") && has(bmsDiagLine().s, "2) BMS JK_B2A8S20P") && !has(bmsDiagLine().s, "з'єднань"), "«🛠 Сторож»: по черзі, опитування");
+  jsonOut("multi");
+  run2(280);
+  check(bmsSoc() == 33, "дані віком до 5 хв — свіжі (найменший заряд 33 %)");
+  check(since().empty(), "кадр віком 4–5 хв — не «пропала»");
+  s2.p[1].soc = 29; run2(320); v = since();
+  check(v.size() == 1 && has(v[0].text, "Батарея 2 «Гараж»: заряд 29 %"), "друга: «Батарея 2 «Гараж»: заряд 29 %»");
+  size_t l1 = g_log.size();
+  run2(600);
+  bool conn = false;
+  for (size_t i = l1; i < g_log.size(); i++) if (has(g_log[i], "нове під'єднання")) conn = true;
+  check(!conn, "кожне опитування — не рядок журналу (міст шле rc=0)");
+
+  puts("16) Друга BMS зникла: «пропала» — лише вона, за 15 хв; повернулась — «знову на зв'язку»");
+  since(); s2.p[1].on = false;
+  run2(14 * 60);
+  check(since().empty(), "14 хв — тиша");
+  run2(4 * 60); v = since();
+  check(v.size() == 1 && has(v[0].text, "Батарея 2 «Гараж»: BMS не на зв'язку") && has(v[0].text, "міст не чує BMS під час опитування") && v[0].silent,
+        "одне — лише про другу, без звуку");
+  check(has(bmsStatusLine().s, "Батарея 1 «Інвертор» 70 %") && has(bmsStatusLine().s, "Батарея 2 «Гараж»: даних від BMS немає"), "«📊 Стан»: перша є, другої немає");
+  s2.p[1].on = true; s2.p[1].polled = -1; run2(90); v = since();
+  check(v.size() == 1 && has(v[0].text, "Батарея 2 «Гараж»: BMS знову на зв'язку") && has(v[0].text, "Заряд 29 %"), "«знову на зв'язку» — друга");
+
+  puts("17) Міст замовк: одне повідомлення на обидві; повернувся — одне з обома");
+  s2.on = false; run2(16 * 60); v = since();
+  check(v.size() == 1 && has(v[0].text, "BMS не на зв'язку") && has(v[0].text, "Від мосту батареї"), "одне на обидві — «від мосту нічого не приходить»");
+  s2.on = true; s2.p[0].polled = s2.p[1].polled = -1; run2(90); v = since();
+  check(v.size() == 1 && has(v[0].text, "Міст батареї знову на зв'язку") && has(v[0].text, "Батарея 1 «Інвертор»: Заряд 70 %") && has(v[0].text, "Батарея 2 «Гараж»: Заряд 29 %"),
+        "одне — з обома батареями");
+
+  puts("18) Батарей поменшало (2 → 1): друга зникає зі сторінки й «Стану»; одна — тексти як раніше");
+  s2.bn = 1; s2.per = 0; run2(30);
+  check(!P[1].used && Br.bn == 1, "друга прибрана");
+  check(!P[0].lbl[0], "назва першої зникла разом з режимом «по черзі» (1.0.52)");
+  check(has(bmsStatusLine().s, "🔋 Батарея 70 %") && !has(bmsStatusLine().s, "«"), "«📊 Стан» — як для однієї");
+  check(!g_log.empty(), "у журналі — зміна переліку");
+  bool line = false;
+  for (auto& x : g_log) if (has(x, "одна батарея, постійне з'єднання")) line = true;
+  check(line, "рядок «одна батарея, постійне з'єднання»");
 
   printf("\n%s: помилок %d\n", fails ? "НЕ ПРОЙДЕНО" : "ПРОЙДЕНО", fails);
   return fails ? 1 : 0;

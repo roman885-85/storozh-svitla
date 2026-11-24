@@ -8,7 +8,9 @@ clang++ -std=c++17 -O1 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function 
 /tmp/bat-test || exit 1
 python3 -c "
 import json
-for n in ('fresh', 'alarm', 'lost'):
+for n in ('fresh', 'alarm', 'lost', 'multi'):
     d = json.load(open('/tmp/bat-test-%s.json' % n))
-    print('JSON «%s» правильний:' % n, {k: d.get(k) for k in ('on', 'ok', 'bridge', 'soc', 'alarm', 'left')}, 'комірок', len(d.get('cells', [])))
+    bs = d.get('bats', [])
+    print('JSON «%s» правильний:' % n, {k: d.get(k) for k in ('on', 'ok', 'bridge', 'bn', 'per')},
+          [{k: b.get(k) for k in ('k', 'lbl', 'ok', 'soc', 'alarm', 'left')} for b in bs], 'комірок', [len(b.get('cells', [])) for b in bs])
 "

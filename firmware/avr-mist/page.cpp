@@ -74,7 +74,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
  <div class="card"><details id="stdet"><summary>Статистика світла: скільки було й не було</summary><div id="sttext" class="mut" style="white-space:pre-wrap;margin-top:8px"></div></details></div>
  <div class="card"><b>Пристрої</b> <span id="dvcnt" class="mut"></span>
  <div class="mut" style="margin-top:4px">Що прив'язано до Сторожа і чи воно зараз на зв'язку. Нижче — інші пристрої, під'єднані до точки Wi-Fi Сторожа: їх можна прив'язати.</div>
- <div class="tbl"><table id="dvb"></table></div>
+ <div class="tbl"><table id="dvb"></table></div><div id="dvmsg" class="msg hide"></div>
  <div style="margin-top:14px"><b>Інші пристрої в мережі Сторожа</b></div>
  <div class="tbl"><table id="cl"></table></div><div class="mut" id="clhint"></div></div>
 </section>
@@ -300,7 +300,10 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
  <iframe id="insf" title="Схеми підключення" style="width:100%;height:2400px;border:0;display:block"></iframe>
 </section>
 <section id="upd" class="hide"><div class="card"><b>Оновлення прошивки</b><div class="mut" id="ver"></div>
- <input type="file" id="fw" accept=".bin" style="margin-top:10px"><div style="margin-top:10px"><button class="p" data-act="upload">Завантажити</button></div><div id="umsg" class="msg hide"></div></div></section>
+ <input type="file" id="fw" accept=".bin" style="margin-top:10px"><div style="margin-top:10px"><button class="p" data-act="upload">Завантажити</button> <button type="button" data-act="reboot" data-msg="umsg">Перезапустити Сторожа</button></div><div id="umsg" class="msg hide"></div></div>
+ <div class="card hide" id="bfwcard"><b>Оновлення мосту батареї</b><div class="mut" id="bfwver"></div>
+ <div class="mut" style="margin-top:6px">Файл мосту <b>…-app.bin</b> — той варіант (usb чи uart), що зараз на мості. Сторож прийме файл, перевірить і сам передасть мосту по своїй мережі: з інтернету міст нічого не завантажує. Міст на хвилину перерве зв'язок з BMS; якщо нова прошивка не запрацює — повернеться попередня. Налаштування мосту лишаються.</div>
+ <input type="file" id="bfw" accept=".bin" style="margin-top:10px"><div style="margin-top:10px"><button class="p" data-act="bfwup">Оновити міст батареї</button> <button type="button" data-act="bmsreboot" data-msg="bfwmsg">Перезапустити міст</button></div><div id="bfwmsg" class="msg hide"></div></div></section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -328,6 +331,9 @@ function renderDev(d){
  const isY=x=>!!(x&&x.assoc&&x.ip&&x.ip===you),isR=m=>(parseInt(m.slice(0,2),16)&2)!==0;
  let h='<tr class="mut"><td>Пристрій · MAC, адреса</td><td>Стан</td></tr>',nb=0,on=0;
  const s=n.sta||{};
+ //  1.0.53: сам Сторож — з кнопкою перезапуску (власник 23.11.2026: «в устройствах в веб интерфейсах нужны кнопки перезагрузки»)
+ h+='<tr><td><b>Сторож</b>'+sm('цей пристрій')+'</td><td>'+ok('працює')+sm('версія '+esc(d.ver||'')+(d.up!=null?' · працює '+ago(d.up):'')+(d.heap?' · вільно '+Math.round(d.heap/1024)+' КБ':''))+
+  '<br><button type="button" data-act="reboot" data-msg="dvmsg" style="margin-top:6px">Перезапустити Сторожа</button></td></tr>';
  h+='<tr><td><b>Роутер</b>'+sm(esc(s.ssid||'не задано')+' · інтернет')+ad(s.bssid||'',null)+'</td><td>'+(s.up?ok('під\'єднано')+sm('сигнал '+s.rssi+' дБм'+(s.pref===false?' · <b class="err">не бажана точка</b>':'')+(s.ip?' · адреса Сторожа '+esc(s.ip):'')):bad('немає зв\'язку'))+'</td></tr>';
  if(!w.avr.assigned)h+='<tr><td><b>АВР</b></td><td>'+bad('не прив\'язано')+sm('підключіть АВР у застосунку eWeLink до точки «'+esc(n.ap.ssid)+'» і натисніть «Це АВР» у його рядку нижче')+'</td></tr>';
  else{const x=C[avr];let st;nb++;
@@ -341,10 +347,14 @@ function renderDev(d){
   const st=b.seen&&b.alive?(on++,ok('на зв\'язку')+sm('вістка '+ago(b.ago)+' тому · '+b.rssi+' дБм'+(b.ver?' · версія '+esc(b.ver):''))):
    b.seen?bad('мовчить')+sm('востаннє '+ago(b.ago)+' тому'):bad('не на зв\'язку')+sm('не озивався від запуску Сторожа');
   h+='<tr><td><b>Маячок «'+esc(b.name||b.mac.slice(9))+'»</b>'+sm('прив\'язано · '+(RN[b.role]||esc(b.role)))+ad(b.mac,x)+'</td><td>'+st+'</td></tr>'}
- if(bm){nb++;const x=C[bm],BS=['шукає BMS — її не чути','під\'єднується до BMS','BMS на зв\'язку','BMS не шле стану','пауза перед новою спробою під\'єднатись до BMS'];
-  const st=bat.bridge?(on++,ok('на зв\'язку')+sm((bat.ver?'версія '+esc(bat.ver)+' · ':'')+bat.rssi+' дБм · '+(bat.ok?'BMS «'+esc(bat.name||'')+'» на зв\'язку'+(bat.soc!=null?', '+bat.soc+' %':''):(BS[bat.st]||'BMS не на зв\'язку')))):
+ if(bm){nb++;const x=C[bm],BS=['шукає BMS — її не чути','під\'єднується до BMS','BMS на зв\'язку','BMS не шле стану','пауза перед новою спробою під\'єднатись до BMS','чекає черги опитати BMS','BMS не чути','BMS не відповіла'];
+  const bs=bat.bats||[],b0=bs[0]||{},okN=bs.filter(y=>y.ok).length;
+  const st=bat.bridge?(on++,ok('на зв\'язку')+sm((bat.ver?'версія '+esc(bat.ver)+' · ':'')+bat.rssi+' дБм · '+(bs.length>1?'BMS зі свіжими даними: '+okN+' з '+bs.length+(bat.per?', по черзі '+(bat.per>=120?'раз на '+Math.round(bat.per/60)+' хв':'щохвилини'):''):
+    b0.ok?'BMS «'+esc(b0.name||'')+'» на зв\'язку'+(b0.soc!=null?', '+b0.soc+' %':'')+(bat.per?' (опитує раз на '+Math.round(bat.per/60)+' хв)':''):(BS[b0.st]||'BMS не на зв\'язку')))):
    bad('не на зв\'язку')+sm('востаннє '+ago(bat.ago)+' тому');
-  h+='<tr><td><b>Міст батареї</b>'+sm('прив\'язується сам: шле Сторожу дані BMS')+ad(bm,x)+'</td><td>'+st+'</td></tr>'}
+  const bv=(bat.ver||'0').split('.').map(Number),rbOk=bv[0]>1||(bv[0]===1&&(bv[1]>2||(bv[1]===2&&bv[2]>=3)));   // кнопка — з мосту 1.2.3
+  h+='<tr><td><b>Міст батареї</b>'+sm('прив\'язується сам: шле Сторожу дані BMS')+ad(bm,x)+'</td><td>'+st+
+   (bat.bridge&&rbOk?'<br><button type="button" data-act="bmsreboot" data-msg="dvmsg" style="margin-top:6px">Перезапустити міст</button>':'')+'</td></tr>'}
  $('dvb').innerHTML=h;
  $('dvcnt').textContent='· прив\'язано '+nb+', на зв\'язку '+on;
  const bound=new Set([avr,bm].concat(BL.filter(b=>b.cfg).map(b=>b.mac))),BU={};
@@ -396,7 +406,7 @@ function render(d){
  row('Годинник',esc(d.clock));
  row('Міст',esc(d.ver)+', працює '+ago(d.up)+', пам\'яті вільно '+Math.round(d.heap/1024)+' КБ'+(d.recentHeap!=null?' (найменше за 10 хв — '+Math.round(d.recentHeap/1024)+')':''));
  $('rows').innerHTML=r;
- renderBat(d.bat);
+ renderBat(d.bat);renderBfw(d.bat);
  renderSch(d.sch);
  renderDev(d);                                   // 1.0.42: картка «Пристрої»
  if(d.mem){const m=d.mem,k=x=>Math.round(x/1024),S=m.stk||{},N={loopTask:'основна',tg:'Telegram',snd:'звук',selfchk:'самоперевірка',ping:'ping'};
@@ -436,24 +446,30 @@ function schDay(x,now,title){if(!x||!x.have)return '<div class="sday"><b>'+title
 let batPend=false;
 function renderBat(b){const c=$('batcard');if(!b){c.classList.add('hide');return}c.classList.remove('hide');
  const f=(x,d,k)=>(x/d).toFixed(k).replace('.',','),hm=m=>m>=60?Math.floor(m/60)+' год'+(m%60?' '+m%60+' хв':''):m+' хв',
-  ST=['міст шукає BMS — її не чути поруч','міст під\'єднується до BMS','на зв\'язку','міст під\'єднаний, але стану від BMS немає','міст чекає перед новою спробою під\'єднатись'];
- let h='';
- if(b.ok&&b.soc!=null){const i=b.i,ch=i<=-300?'розряд '+f(-i,1000,1)+' А':i>=300?'заряд '+f(i,1000,1)+' А':'спокій';
-  h+='<div class="big">'+b.soc+' %</div><div>'+f(b.v,1000,2)+' В · '+ch+' · '+Math.abs(Math.round(b.v*b.i/1e6))+' Вт'+(b.left>=0?' · вистачить ~'+hm(b.left)+' (до повного розряду)':'')+'</div>';
-  h+='<div class="mut">Залишок '+f(b.rem,1000,1)+' з '+f(b.full,1000,1)+' А·год · циклів '+b.cyc+' · стан '+b.soh+' %</div>';
-  h+='<div style="margin-top:6px">Комірки: '+b.n+', від '+f(b.lo,1000,3)+' В (№'+b.lox+') до '+f(b.hi,1000,3)+' В (№'+b.hix+'), різниця '+(b.hi-b.lo)+' мВ</div>';
-  if(b.cells&&b.cells.length)h+='<div class="cells">'+b.cells.map((v,k)=>'<span class="'+(k+1===b.lox?'lo':k+1===b.hix?'hi':'')+'">'+(k+1)+': '+f(v,1000,3)+'</span>').join('')+'</div>';
-  const T=[];if(b.t1!=null)T.push('датчик 1 — '+f(b.t1,10,1)+' °C');if(b.t2!=null)T.push('датчик 2 — '+f(b.t2,10,1)+' °C');if(b.tm!=null)T.push('ключі — '+f(b.tm,10,1)+' °C');
-  if(T.length)h+='<div style="margin-top:6px">Температура: '+T.join(', ')+'</div>';
-  h+='<div>Заряд '+(b.chg?'дозволено':'<b class="err">вимкнено BMS</b>')+' · розряд '+(b.dis?'дозволено':'<b class="err">вимкнено BMS</b>')+(b.bal?' · вирівнює комірки':'')+(b.heat?' · підігрів':'')+'</div>';
-  h+='<div>'+(b.alarm?'<b class="err">BMS повідомляє: '+esc(b.alarm)+'</b>':'Тривог BMS немає')+'</div>';
- }else h+='<div><b class="err">'+(!b.seen?'Міст батареї від запуску Сторожа не озивався':!b.bridge?'Міст батареї не на зв\'язку '+ago(b.ago):(b.soc!=null?'Даних від BMS немає '+ago(b.age)+' — ':'Даних від BMS ще немає — ')+ST[b.st||0])+'</b></div>';
+  ST=['міст шукає BMS — її не чути поруч','міст під\'єднується до BMS','на зв\'язку','міст під\'єднаний, але стану від BMS немає','міст чекає перед новою спробою під\'єднатись','міст чекає черги опитати BMS','міст не чує BMS під час опитування','BMS не відповіла мосту'];
+ const bs=b.bats||[],many=bs.length>1;let h='';
+ //  1.0.48: міст 1.2.0 слухає кілька BMS по черзі — кожна батарея окремо
+ for(const x of bs){
+  if(many)h+='<div style="margin-top:'+(x.k?'14':'4')+'px"><b>Батарея '+(x.k+1)+(x.lbl?' «'+esc(x.lbl)+'»':'')+'</b> <span class="mut">'+esc(x.name||'')+(x.bmac?' · '+esc(x.bmac):'')+(x.ok&&x.age!=null?' · дані '+ago(x.age)+' тому':'')+'</span></div>';
+  if(x.ok&&x.soc!=null){const i=x.i,ch=i<=-300?'розряд '+f(-i,1000,1)+' А':i>=300?'заряд '+f(i,1000,1)+' А':'спокій';
+   h+='<div class="big">'+x.soc+' %</div><div>'+f(x.v,1000,2)+' В · '+ch+' · '+Math.abs(Math.round(x.v*x.i/1e6))+' Вт'+(x.left>=0?' · вистачить ~'+hm(x.left)+' (до повного розряду)':'')+'</div>';
+   h+='<div class="mut">Залишок '+f(x.rem,1000,1)+' з '+f(x.full,1000,1)+' А·год · циклів '+x.cyc+' · стан '+x.soh+' %</div>';
+   h+='<div style="margin-top:6px">Комірки: '+x.n+', від '+f(x.lo,1000,3)+' В (№'+x.lox+') до '+f(x.hi,1000,3)+' В (№'+x.hix+'), різниця '+(x.hi-x.lo)+' мВ</div>';
+   if(x.cells&&x.cells.length)h+='<div class="cells">'+x.cells.map((v,k)=>'<span class="'+(k+1===x.lox?'lo':k+1===x.hix?'hi':'')+'">'+(k+1)+': '+f(v,1000,3)+'</span>').join('')+'</div>';
+   const T=[];if(x.t1!=null)T.push('датчик 1 — '+f(x.t1,10,1)+' °C');if(x.t2!=null)T.push('датчик 2 — '+f(x.t2,10,1)+' °C');if(x.tm!=null)T.push('ключі — '+f(x.tm,10,1)+' °C');
+   if(T.length)h+='<div style="margin-top:6px">Температура: '+T.join(', ')+'</div>';
+   h+='<div>Заряд '+(x.chg?'дозволено':'<b class="err">вимкнено BMS</b>')+' · розряд '+(x.dis?'дозволено':'<b class="err">вимкнено BMS</b>')+(x.bal?' · вирівнює комірки':'')+(x.heat?' · підігрів':'')+'</div>';
+   h+='<div>'+(x.alarm?'<b class="err">BMS повідомляє: '+esc(x.alarm)+'</b>':'Тривог BMS немає')+'</div>';
+  }else h+='<div><b class="err">'+(!b.bridge?'Міст батареї не на зв\'язку '+ago(b.ago):(x.soc!=null?'Даних від BMS немає '+ago(x.age)+' — ':'Даних від BMS ще немає — ')+(ST[x.st]||ST[0]))+'</b></div>';
+  if(b.per)h+='<div class="mut">Опитує по черзі '+(b.per>=120?'раз на '+Math.round(b.per/60)+' хв':'щохвилини')+': опитувань '+(x.pl||0)+(x.pf?', невдалих '+x.pf:'')+'</div>'}
+ if(!bs.length)h+='<div><b class="err">'+(!b.seen?'Міст батареї від запуску Сторожа не озивався':!b.bridge?'Міст батареї не на зв\'язку '+ago(b.ago):'Даних від BMS ще немає')+'</b></div>';
  //  сторінка мосту через Сторожа працює з версії мосту 1.1.0 (старіша питає свої адреси не через /bms/)
  const bv=(b.ver||'0').split('.').map(Number),bNew=bv[0]>1||(bv[0]===1&&bv[1]>=1);
- if(b.seen&&b.bridge)h+=bNew?'<div style="margin-top:8px"><a class="btn" href="/bms/" target="_blank" rel="noopener">Сторінка мосту батареї</a> <span class="mut">дисплей мосту, яку BMS слухати, оновлення мосту'+(b.lcd?' · дисплей увімкнено':'')+'</span></div>'
+ if(b.seen&&b.bridge)h+=bNew?'<div style="margin-top:8px"><a class="btn" href="/bms/" target="_blank" rel="noopener">Сторінка мосту батареї</a> <span class="mut">які BMS слухати, світло й звук, дисплей мосту'+(b.lcd?' (увімкнено)':'')+', оновлення мосту</span></div>'
   :'<div class="mut" style="margin-top:8px">Сторінка мосту (дисплей, оновлення по мережі) відкриватиметься звідси з версії мосту 1.1.0 — зараз '+esc(b.ver)+': її ставлять кабелем USB.</div>';
- if(b.seen)h+='<div class="mut" style="margin-top:6px">Міст '+esc(b.mac)+', версія '+esc(b.ver)+(b.up?', працює '+ago(b.up):'')+', Wi-Fi '+b.rssi+' дБм'+(b.name?' · BMS '+esc(b.name)+(b.model&&b.model!==b.name?' ('+esc(b.model)+')':'')+(b.sw?', прошивка '+esc(b.sw):'')+', '+b.brssi+' дБм':'')+' · з\'єднань із BMS '+b.rc+'</div>';
- $('batbody').innerHTML=h;$('batsub').textContent=b.ok?'дані '+ago(b.age)+' тому':'';
+ if(b.seen){const x=bs[0]||{};h+='<div class="mut" style="margin-top:6px">Міст '+esc(b.mac)+', версія '+esc(b.ver)+(b.up?', працює '+ago(b.up):'')+', Wi-Fi '+b.rssi+' дБм'+
+  (!many&&x.name?' · BMS '+esc(x.name)+(x.model&&x.model!==x.name?' ('+esc(x.model)+')':'')+(x.sw?', прошивка '+esc(x.sw):'')+', '+x.brssi+' дБм':'')+(b.per?'':' · з\'єднань із BMS '+b.rc)+'</div>'}
+ $('batbody').innerHTML=h;const x0=bs[0];$('batsub').textContent=many?(bs.filter(y=>y.ok).length+' з '+bs.length+' зі свіжими даними'):x0&&x0.ok?'дані '+ago(x0.age)+' тому':'';
  if(!batPend)$('bat_on').checked=!!b.on}
 $('bat_on').addEventListener('change',async e=>{batPend=true;const on=e.target.checked;
  try{await j('/api/bms',{method:'POST',body:new URLSearchParams({on:on?'1':'0'})});$('batsub').textContent=on?'сповіщення ввімкнено':'сповіщення вимкнено'}
@@ -644,6 +660,33 @@ function preview(u){const AC=window.AudioContext||window.webkitAudioContext,ac=n
 [['g_fLost',0,'g_upLost'],['g_fBack',1,'g_upBack']].forEach(([id,w,out])=>$(id).onchange=async e=>{pcm[w]=null;const f=e.target.files[0];if(!f)return;note(out,'Перетворюю…');
  try{const r=await toPcm(f);pcm[w]=r.u;note(out,'Готово: '+(r.u.length/16000).toFixed(1)+' с'+(r.full>3.05?' (обрізано з '+r.full.toFixed(1)+' с до 3 с)':'')+', '+Math.round(r.u.length/1024)+' КБ. Прослухайте, як звучатиме, і завантажте.')}
  catch(err){note(out,'Цей файл браузер не відкриває — спробуйте MP3 або WAV',1)}});
+//  1.0.48: оновлення мосту батареї файлом через Сторожа: файл → /api/bmsfw, потім /bms/ota з адресою, далі — чекати нову версію
+let bfwOn=false;
+function renderBfw(b){const on=!!(b&&b.seen);$('bfwcard').classList.toggle('hide',!on);if(on)$('bfwver').textContent='Зараз на мості версія '+(b.ver||'?')+(b.bridge?'':' · міст не на зв\'язку')}
+async function bfwUp(){if(bfwOn)return;const f=$('bfw').files[0];if(!f){note('bfwmsg','Виберіть файл прошивки мосту …-app.bin',1);return}
+ if(/-full\.bin$/i.test(f.name)){note('bfwmsg','Потрібен файл …-app.bin (…-full.bin — лише для прошивки кабелем)',1);return}
+ let bv=null;try{const r=await fetch('/bms/state',{credentials:'same-origin',cache:'no-store'});if(r.ok)bv=await r.json()}catch(e){}
+ if(!bv){note('bfwmsg','Міст батареї не відповідає — оновити зараз не вийде',1);return}
+ const want=bv.var||'usb';if(!f.name.includes('-'+want+'-')&&!confirm('На мості варіант «'+want+'», а файл — «'+f.name+'». Усе одно ставити?'))return;
+ if(!confirm('Оновити міст батареї (зараз версія '+bv.ver+') файлом «'+f.name+'»? Зв\'язок з BMS перерветься на хвилину.'))return;
+ bfwOn=true;const x=new XMLHttpRequest(),fd=new FormData();fd.append('fw',f,f.name);
+ x.upload.onprogress=e=>note('bfwmsg','Передаю файл Сторожу: '+Math.round(e.loaded*100/e.total)+'%'+(e.loaded>=e.total?' — Сторож записує його…':''));
+ x.onerror=()=>{bfwOn=false;note('bfwmsg','Обрив зв\'язку під час передачі файлу — спробуйте ще раз',1)};
+ x.onload=async()=>{let d;try{d=JSON.parse(x.responseText)}catch(e){d={err:x.status===502?'Проміжний сервер не дочекався відповіді (502) — спробуйте ще раз':x.responseText}}
+  if(x.status!==200){bfwOn=false;note('bfwmsg',d.err||('HTTP '+x.status),1);return}
+  note('bfwmsg','Сторож прийняв файл ('+Math.round(d.size/1024)+' КБ). Кажу мосту оновитись…');
+  try{const r=await fetch('/bms/ota',{method:'POST',body:new URLSearchParams({url:d.url}),credentials:'same-origin'});const t=await r.json();if(!r.ok)throw new Error(t.err||('HTTP '+r.status))}
+  catch(err){bfwOn=false;note('bfwmsg','Міст не прийняв команду: '+err.message,1);return}
+  bfwWatch(bv.ver,d.size)};
+ x.open('POST','/api/bmsfw');x.send(fd)}
+async function bfwWatch(old,size){const t0=Date.now();
+ for(;;){await new Promise(r=>setTimeout(r,2500));
+  if(Date.now()-t0>300000){bfwOn=false;note('bfwmsg','За 5 хв міст так і не озвався новою версією — подивіться «Журнал» і сторінку мосту',1);return}
+  let s=null,b=null;try{s=await j('/api/bmsfw')}catch(e){}
+  try{const r=await fetch('/bms/state',{credentials:'same-origin',cache:'no-store'});if(r.ok)b=await r.json()}catch(e){}
+  if(b&&b.ver&&b.ver!==old){bfwOn=false;note('bfwmsg','Готово: міст батареї тепер версії '+b.ver+'.');refresh();return}
+  if(b&&b.ota&&b.ota.indexOf('не вдалося')===0){bfwOn=false;note('bfwmsg','Міст: '+b.ota,1);return}
+  note('bfwmsg',s&&s.got?'Міст завантажив прошивку — перезапускається…':s&&s.sent?'Міст завантажує: '+Math.min(100,Math.round(s.sent*100/size))+'%':'Чекаю, доки міст почне завантаження…')}}
 function upload(){
  const f=$('fw').files[0];if(!f){note('umsg','Виберіть файл прошивки .bin',1);return}
  const x=new XMLHttpRequest(),fd=new FormData();fd.append('fw',f,f.name);
@@ -655,7 +698,7 @@ $('icopick').innerHTML=ICONS.map(x=>'<button type="button" data-act="icopick" da
 ['f_obj','f_objIco'].forEach(id=>$(id).addEventListener('input',icoPrev));
 document.addEventListener('click',async e=>{
  const b=e.target.closest('button[data-act]');if(!b)return;const a=b.dataset.act;
- if(a==='save')save();else if(a==='scan')scan();else if(a==='upload')upload();
+ if(a==='save')save();else if(a==='scan')scan();else if(a==='upload')upload();else if(a==='bfwup')bfwUp();
  else if(a==='test'){try{await j('/api/test',{method:'POST'});note('tmsg','Повідомлення в черзі, перевірте Telegram.')}catch(err){note('tmsg',err.message,1)}}
  else if(a==='rtest'){try{await j('/api/test',{method:'POST',body:new URLSearchParams({id:b.dataset.id})});note('rmsg','Пробне повідомлення в черзі, перевірте Telegram.')}catch(err){note('rmsg',err.message,1)}}
  else if(a==='del'){if(!confirm('Прибрати «'+b.dataset.name+'» зі сповіщень?'))return;try{await j('/api/delchat',{method:'POST',body:new URLSearchParams({id:b.dataset.id})});note('rmsg','Прибрано. Людині прийде «Сповіщення вимкнено».');loadTg();refresh()}catch(err){note('rmsg',err.message,1)}}
@@ -697,7 +740,10 @@ document.addEventListener('click',async e=>{
  else if(a==='savenight'){const f=parseInt($('f_tgNF').value,10),t=parseInt($('f_tgNT').value,10);if(!(f>=0&&f<=23&&t>=0&&t<=23)){note('nightmsg','Години — від 0 до 23',1);return}try{await j('/api/settings',{method:'POST',body:new URLSearchParams({tgNF:String(f),tgNT:String(t)})});note('nightmsg','Збережено.')}catch(err){note('nightmsg',err.message,1)}}
  else if(a==='savesum'){const h=parseInt($('f_sumHour').value,10);if(!(h>=0&&h<=23)){note('summsg','Година — від 0 до 23',1);return}try{await j('/api/settings',{method:'POST',body:new URLSearchParams({sumOn:$('f_sumOn').checked?'1':'0',sumHour:String(h)})});note('summsg','Збережено.')}catch(err){note('summsg',err.message,1)}}
  else if(a==='savetok'){const v=$('f_tgToken').value.trim();if(!v){note('tmsg','Вставте токен від @BotFather',1);return}try{await j('/api/settings',{method:'POST',body:new URLSearchParams({tgToken:v})});note('tmsg','Токен збережено.');loadTg();refresh()}catch(err){note('tmsg',err.message,1)}}
- else if(a==='reboot'){if(!confirm('Перезапустити Сторожа? АВР на кілька секунд втратить Wi-Fi.'))return;try{await j('/api/reboot',{method:'POST'})}catch(err){}note('smsg','Перезапуск…')}
+ else if(a==='reboot'){const mid=b.dataset.msg||'smsg';if(!confirm('Перезапустити Сторожа? АВР на кілька секунд втратить Wi-Fi, сторінка повернеться за 20–30 секунд.'))return;try{await j('/api/reboot',{method:'POST'})}catch(err){}note(mid,'Сторож перезапускається — сторінка повернеться за 20–30 секунд.')}
+ else if(a==='bmsreboot'){const mid=b.dataset.msg||'bfwmsg';if(!confirm('Перезапустити міст батареї? Зв\'язок з BMS перерветься на хвилину, BMS коротко пискне.'))return;
+  try{const r=await fetch('/bms/reboot',{method:'POST',credentials:'same-origin'});let t;try{t=await r.json()}catch(e){t={err:r.status===404?'Міст старший за 1.2.3 — кнопки перезапуску в ньому немає':'HTTP '+r.status}}if(!r.ok)throw new Error(t.err||('HTTP '+r.status));
+   note(mid,'Міст батареї перезапускається — за хвилину знову на зв\'язку.')}catch(err){note(mid,err.message,1)}}
  else if(a==='icopick'){$('f_objIco').value=b.dataset.ico;icoPrev()}
  else if(a==='bcnpick'){const m=b.dataset.mac,nb=document.querySelector('nav button[data-t="set"]');if(nb)nb.click();
   setTimeout(()=>{$('b_mac').value=m;$('bcncard').scrollIntoView({behavior:'smooth'});$('b_name').focus()},300)}

@@ -15,6 +15,7 @@
 #include "mem.h"
 #include "crash.h"
 #include "webguard.h"
+#include "fwrelay.h"
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WebServer.h>
@@ -892,9 +893,12 @@ static void hBmsProxy() {
     form += String(form.length() ? "&" : "") + urlEnc(srv.argName(i)) + "=" + urlEnc(srv.arg(i));
   }
   bool post = srv.method() == HTTP_POST;
+  //  1.0.51: браузер приймає gzip — просимо стиснуту (міст 1.2.1+ віддає сторінку 12 КБ замість 38) і передаємо як є
+  bool gz = srv.header("Accept-Encoding").indexOf("gzip") >= 0;
   WiFiClient c;
   if (!c.connect(IPAddress(ip), 80, 2500)) { srv.send(502, "text/plain; charset=utf-8", "Міст батареї не відповідає"); return; }
-  String rq = String(post ? "POST " : "GET ") + path + (!post && form.length() ? "?" + form : String()) + " HTTP/1.0\r\nHost: bridge\r\nConnection: close\r\n";
+  String rq = String(post ? "POST " : "GET ") + path + (!post && form.length() ? "?" + form : String()) + " HTTP/1.0\r\nHost: bridge\r\nConnection: close\r\n" +
+              (gz ? "Accept-Encoding: gzip\r\n" : "");
   if (post) rq += "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: " + String(form.length()) + "\r\n";
   rq += "\r\n";
   if (post) rq += form;
@@ -902,7 +906,7 @@ static void hBmsProxy() {
   //  заголовки відповіді: код і тип вмісту
   uint32_t t0 = millis();
   int code = 0;
-  String ctype = "text/plain; charset=utf-8", line;
+  String ctype = "text/plain; charset=utf-8", cenc, line;
   bool head = true;
   while (head && millis() - t0 < 6000 && (c.connected() || c.available())) {
     if (!c.available()) { delay(2); continue; }
@@ -912,13 +916,15 @@ static void hBmsProxy() {
     if (!line.length()) { head = false; break; }
     if (!code && line.startsWith("HTTP/")) code = line.substring(9, 12).toInt();
     else if (line.length() > 13 && line.substring(0, 13).equalsIgnoreCase("Content-Type:")) { ctype = line.substring(13); ctype.trim(); }
+    else if (line.length() > 17 && line.substring(0, 17).equalsIgnoreCase("Content-Encoding:")) { cenc = line.substring(17); cenc.trim(); }
     line = "";
   }
   if (head || code < 100) { c.stop(); srv.send(502, "text/plain; charset=utf-8", "Міст батареї не відповів вчасно"); return; }
   srv.sendHeader("Cache-Control", "no-store");
+  if (cenc.length()) srv.sendHeader("Content-Encoding", cenc);
   srv.setContentLength(CONTENT_LENGTH_UNKNOWN);
   srv.send(code, ctype, "");
-  uint8_t buf[512];
+  uint8_t buf[1460];                             // 1.0.51: шматками по 1460 Б (було 512 — утричі більше записів)
   while (millis() - t0 < 9000 && (c.connected() || c.available())) {
     int n = c.available() ? c.read(buf, sizeof buf) : 0;
     if (n > 0) srv.sendContent((const char*)buf, (size_t)n);
@@ -1077,6 +1083,7 @@ static void hUpload() {
     upAuth = authOk();
     upChipOk = true;
     if (!upAuth) return;
+    fwrStop();                                    // 1.0.48: розділ, звідки міст батареї брав прошивку, займає оновлення Сторожа
     logEvent("Оновлення прошивки: " + u.filename);
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) Update.printError(Serial);
   } else if (u.status == UPLOAD_FILE_WRITE) {
@@ -1095,10 +1102,43 @@ static void hUpload() {
   }
 }
 
+//  1.0.48: оновлення мосту батареї файлом через Сторожа (fwrelay.h). Сторінка: файл → /api/bmsfw (Сторож перевіряє, що
+//  це застосунок ESP32-C3, кладе його у вільний розділ і роздає 10 хв) → /bms/ota з адресою (міст завантажує сам).
+static bool bfAuth = false;
+static String bfErr;
+static void hBmsFwUpload() {
+  HTTPUpload& u = srv.upload();
+  if (u.status == UPLOAD_FILE_START) {
+    bfAuth = authOk();
+    bfErr = "";
+    if (!bfAuth) return;
+    String e;
+    if (!fwrBegin(e)) bfErr = e;
+    else logEvent("Оновлення мосту батареї: приймаю файл " + u.filename);
+  } else if (u.status == UPLOAD_FILE_WRITE) {
+    if (!bfAuth || bfErr.length()) return;
+    String e;
+    if (!fwrWrite(u.buf, u.currentSize, e)) bfErr = e.length() ? e : String("Не вдалося записати файл");
+  } else if (u.status == UPLOAD_FILE_END) {
+    if (!bfAuth || bfErr.length()) return;
+    String e;
+    if (!fwrEnd(e)) bfErr = e;
+  } else if (u.status == UPLOAD_FILE_ABORTED) {
+    fwrAbort();
+    if (!bfErr.length()) bfErr = "Передачу файлу перервано";
+  }
+}
+static void hBmsFwDone() {
+  if (!bfAuth) { json("{\"err\":\"Потрібен вхід: оновіть сторінку й увійдіть\",\"login\":true}", 401); return; }
+  if (bfErr.length()) { logEvent("Оновлення мосту батареї: " + bfErr); return fail(bfErr); }
+  if (!fwrUrl().length()) return fail("Файл не прийнято");
+  json(fwrJson());
+}
+
 void webBegin() {
   if (int n = sessRestore()) logEvent("Входи на сторінку пережили перезапуск: " + String(n));
-  static const char* hdr[] = {"Cookie", "Origin", "X-Forwarded-For", "X-Real-IP"};
-  srv.collectHeaders(hdr, 4);            // Authorization і Host сервер збирає й так
+  static const char* hdr[] = {"Cookie", "Origin", "X-Forwarded-For", "X-Real-IP", "Accept-Encoding"};
+  srv.collectHeaders(hdr, 5);            // Authorization і Host сервер збирає й так; Accept-Encoding — для /bms/ (1.0.51)
   srv.on("/", HTTP_GET, hIndex);
   srv.on("/login", HTTP_GET, hLoginGet);
   srv.on("/login", HTTP_POST, hLogin);
@@ -1156,6 +1196,8 @@ void webBegin() {
   srv.on("/api/crash.bin", HTTP_GET, hCrashBin);
   srv.on("/api/schfetch", HTTP_POST, []() { if (!auth()) return; schKick(); json("{\"ok\":true}"); });   // «Оновити графік зараз»
   srv.on("/update", HTTP_POST, hUpdateDone, hUpload);
+  srv.on("/api/bmsfw", HTTP_POST, hBmsFwDone, hBmsFwUpload);   // 1.0.48: прошивка мосту батареї через Сторожа
+  srv.on("/api/bmsfw", HTTP_GET, []() { if (!auth()) return; json(fwrJson()); });
   srv.onNotFound([]() {
     if (srv.uri() == "/bms" || srv.uri().startsWith("/bms/")) return hBmsProxy();   // 1.0.39: сторінка мосту батареї
     srv.send(404, "text/plain; charset=utf-8", "Немає такої сторінки");
@@ -1166,5 +1208,6 @@ void webBegin() {
 void webLoop() {
   srv.arm();                                     // 1.0.42: відлік часу на відповідь — для кожного запиту свій
   srv.handleClient();
+  fwrLoop();                                     // 1.0.48: рядки журналу про прошивку мосту батареї
   if (restartPending && (int32_t)(millis() - restartAt) >= 0) restartWith(restartWhy, true);   // дія людини
 }

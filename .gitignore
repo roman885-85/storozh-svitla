@@ -9,3 +9,4 @@ venv/
 release/
 tests/devices/out/*.html
 tests/devices/out/
+tests/bmspage/out/

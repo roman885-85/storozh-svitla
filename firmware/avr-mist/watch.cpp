@@ -100,7 +100,7 @@ static void pollUdp() {
   for (int k = 0; k < 8; k++) {
     int n = udp.parsePacket();
     if (n <= 0) break;
-    char b[600];                                     // 1.0.36: пакет мосту батареї — до ~450 байт
+    char b[768];                                     // 1.0.36: пакет мосту батареї — до ~450 байт; 1.0.48: з bi/bn/per/lbl і 32 комірками — до ~700
     int len = udp.read(b, sizeof(b) - 1);
     if (len < 0) len = 0;
     b[len] = 0;

@@ -25,8 +25,6 @@ static int lcdBlPin = -1;                          // на якому вивод
 static uint8_t lcdTestMode = 0;                    // перевірка: 1 — усе чорне, 2 — шахівниця
 static int lcdTestCon = -1, lcdTestBri = -1;       // перевірка повзунків: контраст і підсвітка без збереження
 static uint32_t lcdTestUntil = 0, lcdStartMs = 0, lcdRefreshMs = 0;
-static float curFast = 0, curSlow = 0;             // струм, мА: згладжений для показу (~5 с) і середній (~5 хв) для «на скільки вистачить»
-static bool curInit = false;
 static char lcdAlarm[200];
 //  Виводи ESP32-C3, які можна дати дисплею: без 9 (кнопка BOOT), 18 і 19 (USB), 11–17 (флеш). 2 і 8 — виводи запуску:
 //  працюють, але краще не займати (на платі SuperMini на 8 ще й світлодіод).
@@ -40,6 +38,7 @@ static bool lcdPinsOk(const LcdSet& s, String& err) {
     if (p[i] < 0) { if (i < 4) { err = String("Вивід ") + N[i] + " потрібен обов'язково"; return false; } continue; }
     if (!lcdPinAllowed(p[i])) { err = String("GPIO") + p[i] + " для " + N[i] + " не підходить"; return false; }
     for (int k = 0; k < i; k++) if (p[k] == p[i]) { err = String("GPIO") + p[i] + " вибрано двічі: " + N[k] + " і " + N[i]; return false; }
+    if (s.on && alertUsesPin(p[i])) { err = String("GPIO") + p[i] + " (" + N[i] + ") уже зайнятий світлом чи звуком — див. картки «Світло» і «Звук»"; return false; }
   }
   return true;
 }
@@ -108,27 +107,32 @@ static void lcdStart() {
   lcdBacklight();
 }
 
+//  1.2.0: батарей кілька — на екрані по черзі, по 5 с кожна; струм згладжують alerts.h (R[].fastMa, R[].slowMa)
+static uint32_t packFreshMs();
 static void lcdView(BatView& v, uint32_t now) {
+  int n = packN();
+  int idx = n > 1 ? (int)((now / 5000) % (uint32_t)n) : 0;
+  static char lbl[24];
   jk::Cells c;
   portENTER_CRITICAL(&mux);
-  c = cells;
+  c = R[idx].c;
+  if (pollMode && idx < nPkc) memcpy(lbl, pkc[idx].lbl, sizeof lbl); else lbl[0] = 0;
   portEXIT_CRITICAL(&mux);
-  uint32_t at = cellsAtMs;
+  uint32_t at = R[idx].atMs;
+  uint8_t st = pollMode ? R[idx].st : bst;
   v.has = at && c.fmt;
-  v.link = bst;
-  if (v.has && bst == 2) {
-    if (!curInit) { curFast = curSlow = (float)c.ma; curInit = true; }
-    curFast += ((float)c.ma - curFast) * 0.2f;
-    //  середній — за ~5 хв; розряд чи заряд щойно почався — з теперішнього струму, а не з нуля
-    if ((c.ma <= -300 && curSlow > -300) || (c.ma >= 300 && curSlow < 300)) curSlow = (float)c.ma;
-    else curSlow += ((float)c.ma - curSlow) / 300.0f;
-  }
+  v.idx = idx;
+  v.count = n;
+  v.label = lbl;
+  bool fresh = v.has && (pollMode ? agoMs(R[idx].atMs) < packFreshMs() : st == ST_OK);
+  v.link = fresh ? 2 : st == ST_OK ? ST_WAIT : st;
+  float fast = R[idx].avgInit ? R[idx].fastMa : (float)c.ma, slow = R[idx].avgInit ? R[idx].slowMa : (float)c.ma;
   v.soc = c.soc;
   v.mv = (int32_t)c.totalMv;
-  v.ma = (int32_t)curFast;
+  v.ma = (int32_t)fast;
   v.leftMin = -1;
-  if (curSlow <= -300) { float m = (float)c.remMah / -curSlow * 60.0f; v.leftMin = m > 99999 ? 99999 : (int)m; }
-  else if (curSlow >= 300 && c.fullMah > c.remMah) { float m = (float)(c.fullMah - c.remMah) / curSlow * 60.0f; v.leftMin = m > 99999 ? 99999 : (int)m; }
+  if (slow <= -300) { float m = (float)c.remMah / -slow * 60.0f; v.leftMin = m > 99999 ? 99999 : (int)m; }
+  else if (slow >= 300 && c.fullMah > c.remMah) { float m = (float)(c.fullMah - c.remMah) / slow * 60.0f; v.leftMin = m > 99999 ? 99999 : (int)m; }
   v.n = c.n; v.lo = c.vmin; v.hi = c.vmax;
   v.hT = c.hasT1 || c.hasT2;
   v.t = c.hasT1 && c.hasT2 ? (c.t1 > c.t2 ? c.t1 : c.t2) : c.hasT1 ? c.t1 : c.t2;
@@ -148,8 +152,8 @@ static void lcdView(BatView& v, uint32_t now) {
   }
   v.alarm = lcdAlarm;
   v.alarmPage = (int)(now / 3000);                 // сторінка тексту тривоги — кожні 3 с
-  v.ageMin = at ? (int)(agoMs(cellsAtMs) / 60000) : 0;   // 1.1.1: не «now − мітка» (див. agoMs)
-  v.rBms = bst == 2 || bst == 3 ? batLevel((int)curRssi, true) : -1;
+  v.ageMin = at ? (int)(agoMs(R[idx].atMs) / 60000) : 0;   // 1.1.1: не «now − мітка» (див. agoMs)
+  v.rBms = fresh || st == ST_NOSTAT ? batLevel((int)R[idx].rssi, true) : -1;
   v.rWifi = WiFi.isConnected() ? batLevel(WiFi.RSSI(), false) : -1;
   v.setup = setupOn;
   v.ap = apName.c_str();

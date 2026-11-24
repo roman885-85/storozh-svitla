@@ -1,7 +1,7 @@
 # Storozh svitla ("Power Watchman")
 
 [Українська](README.md) · [Manual (Ukrainian)](docs/ІНСТРУКЦІЯ.md) · [Wiring diagrams (PDF, Ukrainian)](docs/СХЕМИ.pdf) ·
-[Releases — ready-to-flash files](https://github.com/roman885-85/storozh-svitla/releases/latest)
+[Releases — ready-to-flash files](https://github.com/roman885-85/storozh-svitla-esp32-power-outage-telegram/releases/latest)
 
 **Telegram notifications when mains power goes off and comes back — for any building with a TOMZN / eWeLink automatic
 transfer switch (ATS), without a single wire to the ATS.** An ESP32 becomes a separate Wi-Fi network for the ATS and knows
@@ -27,7 +27,8 @@ What it can watch:
   only (a smart plug or relay on a mains-only outlet) works the same way — Storozh pings it every second.
 - **Generator** — an ESP32-C3 "beacon" plugged into the generator's outlet: running, stopped, "turn it off — mains is back".
 - **Phases and individual lines** — a beacon on each phase or line: on a three-phase input the ATS only sees its own phase.
-- **Battery and inverter** — a battery with a JK BMS plus an ESP32-C3 battery bridge: charge, time left, BMS alarms.
+- **Battery and inverter** — a battery with a JK BMS plus an ESP32-C3 battery bridge: charge, time left, BMS alarms; up to
+  4 BMS per bridge (polled in turn), lights and a buzzer right next to the battery.
 - **YASNO outage schedule** (Dnipro — DnEM and CEK, Kyiv — DTEK): a warning before an outage, tomorrow's schedule.
 - **On-site signals** — an LED strip or two LEDs, a buzzer or a speaker, a Nokia 5110 display.
 - **Statistics** — hours with and without power per day, week and month; a daily summary.
@@ -43,12 +44,12 @@ online for 10 s — on. No guessing, and messages carry the real moment of the e
 
 A **beacon** is an optional ESP32-C3 plugged into an outlet: it says "I'm here" every 2 s; silence means no voltage there.
 A **battery bridge** is an optional ESP32-C3 next to a battery with a **JK BMS**: it keeps a permanent Bluetooth
-connection to the BMS and passes charge, voltage, current, cells, temperatures and alarms to Storozh every 5 s. Storozh
-never connects or writes to the BMS.
+connection to the BMS (or polls up to 4 BMS in turn every 1–30 min, so each beeps once per period) and passes charge,
+voltage, current, cells, temperatures and alarms to Storozh every 5 s. Storozh never connects or writes to the BMS.
 
 ## Getting started
 
-1. Download `avr-mist-<version>-full.bin` from the [releases](https://github.com/roman885-85/storozh-svitla/releases/latest)
+1. Download `avr-mist-<version>-full.bin` from the [releases](https://github.com/roman885-85/storozh-svitla-esp32-power-outage-telegram/releases/latest)
    and flash it to an ESP32 WROOM — in the browser ([esptool-js](https://espressif.github.io/esptool-js/), address `0x0`)
    or with `esptool.py --chip esp32 write_flash 0x0 avr-mist-<version>-full.bin`.
 2. Power Storozh from the router's UPS. Join the "AVR-mist-XXXX" Wi-Fi from a phone (password: "avr" plus the last eight
@@ -74,9 +75,14 @@ Step by step with every setting — the [manual (Ukrainian)](docs/ІНСТРУК
 - **Statistics:** hours with and without power per day, week and month; recent outages.
 - **Beacons** (up to 6): generator, line or phase, "display only".
 - **Battery (JK BMS)** via the battery bridge: a battery card; Telegram alerts when charge drops below 50/30/20/10 % or
-  the remaining time falls under 3 h / 1 h while mains is off, BMS alarms, "BMS offline". The bridge page opens through
-  Storozh's page; the bridge drives an Open-Smart 1.8" ST7567 display (128×64) and updates itself over the network from
-  a file URL (http or https) with rollback.
+  the remaining time falls under 3 h / 1 h while mains is off, BMS alarms, "BMS offline". Several BMS (up to 4) are
+  polled in turn and reported separately ("Battery 2 "Garage": charge 30 %"). On the bridge: lights (two LEDs or a
+  WS2812B strip) and sound (active or passive buzzer: charged, 50/30/20/10/5 %, fully discharged, BMS alarm and more;
+  critical alerts repeat, night mode, mute button) and an Open-Smart 1.8" ST7567 display (128×64). The bridge page opens
+  through Storozh's page; bridge firmware can be installed **as a file through Storozh's page** (Storozh serves it to the
+  bridge over its own network) or from a file URL (http/https), with rollback.
+- **Reboot buttons** for Storozh and the bridge in the "Пристрої" (devices) card and on the "Оновлення" (update) tab; for a
+  beacon — on its own page.
 - **Devices:** a clear list of what is bound to Storozh (router, ATS, beacons, battery bridge) and whether each is online
   now, plus the other devices on its network with what they are (unlisted beacon, phone, unknown — maybe the ATS) and
   "add beacon" / "this is the ATS" buttons.
@@ -115,8 +121,8 @@ Arduino-ESP32 **3.3.3** via `arduino-cli`, partition scheme `min_spiffs` (macOS 
     tools/flash.sh bms --new       # ESP32-C3 battery bridge
 
 After that, update over the network from the device's page. Host tests (macOS, clang): `tests/watch`, `tests/lcd`,
-`tests/yasno`, `tests/bms`, `tests/bat`, `tests/batlcd`, `tests/logring`, `tests/webguard`, `tests/devices` (each has
-`run.sh`).
+`tests/yasno`, `tests/bms`, `tests/bat`, `tests/batlcd`, `tests/logring`, `tests/webguard`, `tests/devices`, `tests/batev`,
+`tests/alert`, `tests/bmspage` (each has `run.sh`).
 
 ## License
 

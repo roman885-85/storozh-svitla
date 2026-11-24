@@ -91,7 +91,8 @@ button.s{background:none;border:1px solid var(--bd);color:var(--fg);font-weight:
 .ok{color:var(--ok)}.bad{color:var(--bad)}.row{display:flex;gap:8px;align-items:center}.row input{width:auto}
 </style></head><body><main>
 <h1>Маячок «Сторожа світла»</h1><div class="mut" id="who"></div>
-<div class="card"><b>Зараз</b><div id="st" style="margin-top:6px">…</div></div>
+<div class="card"><b>Зараз</b><div id="st" style="margin-top:6px">…</div>
+<button class="s" id="rb" type="button">Перезапустити маячок</button><div id="rbmsg" style="margin-top:8px"></div></div>
 <div class="card" id="form"><b>Мережа Сторожа</b>
 <div class="mut">Виберіть мережу Сторожа («AVR-mist-…») і введіть її пароль — той самий, що на сторінці Сторожа в «Налаштування → Точка доступу для АВР».</div>
 <label for="ss">Мережа</label><select id="ss"><option value="">шукаю мережі…</option></select>
@@ -123,6 +124,9 @@ $('go').onclick=async()=>{const s=$('mn').value.trim()||$('ss').value,p=$('pw').
   m.textContent='Ще під\'єднуюсь — оновіть сторінку за хвилину'}
  catch(e){m.textContent=e.message&&e.message!=='Failed to fetch'?e.message:'Зв\'язок обірвався — під\'єднайте телефон до мережі маячка знову й оновіть сторінку'}
  $('go').disabled=false};
+$('rb').onclick=async()=>{if(!confirm('Перезапустити маячок? Він почне з чистого аркуша, як після ввімкнення.'))return;const m=$('rbmsg');
+ try{const r=await fetch('/reboot',{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.err||'помилка');
+  m.textContent='Перезапускаю… Якщо телефон був у мережі маячка, під\'єднайте його знову, коли мережа з\'явиться.'}catch(e){m.innerHTML='<span class="bad">'+esc(e.message)+'</span>'}};
 st();setInterval(st,4000);scan(false);
 </script></body></html>)PAGE";
 
@@ -212,6 +216,16 @@ static void hSave() {
   lastErr = "";
   Serial.printf("Сторінка: збережено мережу «%s». Під'єднуюсь…\n", ssid.c_str());
   connect();
+  web.send(200, "application/json", "{\"ok\":true}");
+}
+//  1.0.18: кнопка «Перезапустити маячок» (власник 23.11.2026: «в устройствах в веб интерфейсах нужны кнопки перезагрузки»).
+//  Зі сторінки налаштування (своя мережа маячка) чи від Сторожа; інші пристрої мережі Сторожа — ні.
+static uint32_t rebootAt = 0;
+static void hReboot() {
+  bool trusted = setupOn || (WiFi.isConnected() && web.client().remoteIP() == WiFi.gatewayIP());
+  if (!trusted) return web.send(403, "application/json", "{\"err\":\"Перезапустити можна зі сторінки налаштування маячка (кнопка BOOT 3 с)\"}");
+  Serial.println("Сторінка: перезапуск маячка");
+  rebootAt = (millis() + 600) | 1;
   web.send(200, "application/json", "{\"ok\":true}");
 }
 static void hAny() {                             // телефон перевіряє «чи є інтернет» — показуємо йому сторінку маячка
@@ -315,6 +329,7 @@ void setup() {
   web.on("/state", HTTP_GET, hState);
   web.on("/scan", HTTP_GET, hScan);
   web.on("/save", HTTP_POST, hSave);
+  web.on("/reboot", HTTP_POST, hReboot);
   web.onNotFound(hAny);
   web.begin();
   if (ssid.length()) connect();
@@ -328,6 +343,7 @@ void loop() {
   serialCmd();
   web.handleClient();
   if (setupOn) dns.processNextRequest();
+  if (rebootAt && (int32_t)(millis() - rebootAt) >= 0) ESP.restart();
   uint32_t now = millis();
   bootBtn(now);
   uint16_t dr = discReason;

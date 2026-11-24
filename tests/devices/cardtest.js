@@ -11,12 +11,13 @@ const grab = name => { const a = js.indexOf('function ' + name + '('); let i = j
 const el = {}; const $ = id => (el[id] = el[id] || { innerHTML: '', textContent: '' });
 eval(grab('esc') + ';' + grab('ago') + ';' + grab('renderDev') + '; globalThis.renderDev = renderDev;');
 const base = () => ({
-  you: '192.168.1.10',
+  you: '192.168.1.10', ver: '1.0.53', up: 9000, heap: 41000,
   watch: { grid: { st: 0, exact: true, ago: 78000, at: '22.11 о 15:09' }, avr: { assigned: true, mac: '10:20:30:40:50:73' },
     bcn: { legacy: false, max: 6, list: [{ mac: '10:20:30:40:50:20', cfg: true, role: 'g', name: 'Генератор', seen: false }] } },
   net: { sta: { ssid: 'MyRouter-2,4', up: true, ip: '192.168.1.X', rssi: -60, bssid: '10:20:30:40:50:E7', pref: true },
     ap: { ssid: 'AVR-mist-5060' }, clients: [{ mac: '10:20:30:40:50:44', ip: '10.77.0.10', assoc: true, rssi: -68, ping: null, seen: 0 }] },
-  bat: { on: true, ok: true, bridge: true, ago: 1, mac: '10:20:30:40:50:44', ver: '1.1.0', rssi: -67, st: 2, name: '40500000000', soc: 53 }
+  bat: { on: true, ok: true, bridge: true, ago: 1, mac: '10:20:30:40:50:44', ver: '1.1.0', rssi: -67, bn: 1, per: 0,
+    bats: [{ k: 0, ok: true, st: 2, name: '40500000000', soc: 53 }] }     // 1.0.48: дані кожної батареї — у bats
 });
 const out = (name, d) => {
   for (const k in el) delete el[k];
@@ -41,3 +42,16 @@ out('card_all', d);
 const u = base(); u.watch.avr = { assigned: false, mac: '' };
 u.net.clients.push({ mac: 'c4:5b:be:00:00:01', ip: '10.77.0.11', assoc: true, rssi: -51, ping: null, seen: 0 });
 out('card_noavr', u);
+//  1.0.48: міст 1.2.0 «по черзі» — дві батареї, одна без свіжих даних
+const m = base(); m.bat.ver = '1.2.3'; m.bat.bn = 2; m.bat.per = 300;
+m.bat.bats = [{ k: 0, ok: true, st: 2, name: 'JK_B2A8S20P', soc: 76, lbl: 'Інвертор' }, { k: 1, ok: false, st: 6, name: 'JK_B2A8S20P', soc: 41, lbl: 'Гараж' }];
+out('card_multi', m);
+if (!/BMS зі свіжими даними: 1 з 2, по черзі раз на 5 хв/.test(el.dvb.innerHTML)) { console.log('ПОМИЛКА: рядок мосту для двох батарей'); process.exit(1); }
+out('card_now_check', base());
+if (!/BMS «40500000000» на зв'язку, 53 %/.test(el.dvb.innerHTML)) { console.log('ПОМИЛКА: рядок мосту для однієї батареї'); process.exit(1); }
+if (!/data-act="bmsreboot"/.test(el.dvb.innerHTML) === false) {}
+out('card_reboot', m);
+if (!/data-act="reboot"/.test(el.dvb.innerHTML) || !/data-act="bmsreboot"/.test(el.dvb.innerHTML)) { console.log('ПОМИЛКА: немає кнопок перезапуску (1.0.53)'); process.exit(1); }
+out('card_old_bridge', base());
+if (/data-act="bmsreboot"/.test(el.dvb.innerHTML)) { console.log('ПОМИЛКА: кнопка перезапуску для мосту старшого за 1.2.3'); process.exit(1); }
+console.log('ПРОЙДЕНО: рядок мосту — одна й дві батареї; кнопки перезапуску Сторожа й мосту (міст 1.2.3+)');

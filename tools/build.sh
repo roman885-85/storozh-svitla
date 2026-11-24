@@ -2,7 +2,7 @@
 # Збирає прошивки АВР-моста на цьому Mac (arduino-cli, ядро esp32 3.3.3).
 #   tools/build.sh          — обидві
 #   tools/build.sh mist     — міст (ESP32 WROOM)
-#   tools/build.sh mayak    — маячок (ESP32-C3 AirM2M Core; два варіанти: usb і uart)
+#   tools/build.sh mayak    — маячок (ESP32-C3 AirM2M Core; два варіанти: usb і uart; версія — firmware/VERSION-mayak)
 #   tools/build.sh bms      — міст батареї JK BMS (ESP32-C3, ті самі два варіанти; версія — firmware/VERSION-bms)
 # Результат — build/<назва>/…-full.bin (усе одним образом з адреси 0x0) і …-app.bin (для оновлення зі сторінки).
 set -euo pipefail
@@ -45,17 +45,18 @@ if [ "$WHAT" = all ] || [ "$WHAT" = mist ]; then
 fi
 
 if [ "$WHAT" = all ] || [ "$WHAT" = mayak ]; then
-  S="$ROOT/firmware/avr-mayak"; ver_h "$S"
+  S="$ROOT/firmware/avr-mayak"
+  MVER="$(tr -d ' \n\r' < "$ROOT/firmware/VERSION-mayak")"; ver_h "$S" "$MVER"   # 1.0.18: своя нумерація (була — версія Сторожа)
   for v in usb uart; do
     cdc=$([ "$v" = usb ] && echo cdc || echo default)
-    echo ">>> маячок $VER, варіант $v ($BUILD)"
+    echo ">>> маячок $MVER, варіант $v ($BUILD)"
     rm -f "$OUT/mayak-$v/avr-mayak.ino."*
     rc=0
     { "$CLI" compile --fqbn "esp32:esp32:AirM2M_CORE_ESP32C3:CDCOnBoot=$cdc" \
         --build-path "$OUT/mayak-$v-bp" --output-dir "$OUT/mayak-$v" "$S" 2>&1 | grep -vE '^(Used |Using |$)'
       rc=${PIPESTATUS[0]}; } || true
     [ "$rc" -eq 0 ] && [ -f "$OUT/mayak-$v/avr-mayak.ino.bin" ] || { echo "ЗБІРКА МАЯЧКА НЕ ВДАЛАСЬ (код $rc)"; exit 1; }
-    merge esp32c3 "$OUT/mayak-$v" avr-mayak 0x0
+    merge esp32c3 "$OUT/mayak-$v" avr-mayak 0x0 "$MVER"
   done
 fi
 
@@ -65,6 +66,7 @@ if [ "$WHAT" = all ] || [ "$WHAT" = bms ]; then
   S="$ROOT/firmware/avr-bms"
   cp "$ROOT/firmware/avr-mist/lcd_font.h" "$S/lcd_font.h"     # шрифт дисплея — один на обидві прошивки (tools/lcd_font.py)
   BVER="$(tr -d ' \n\r' < "$ROOT/firmware/VERSION-bms")"; ver_h "$S" "$BVER"   # не в теці скетча: на Mac «VERSION» заступає <version>
+  python3 "$ROOT/tools/gz_page.py" "$S/page.h" "$S/page_gz.h" || { echo "НЕ ВДАЛОСЬ СТИСНУТИ СТОРІНКУ МОСТУ"; exit 1; }   # 1.2.1
   for v in usb uart; do
     cdc=$([ "$v" = usb ] && echo cdc || echo default)
     echo ">>> міст батареї $BVER, варіант $v ($BUILD)"

@@ -17,7 +17,9 @@
 #include "lcd_font.h"
 
 struct BatView {
-  int8_t link = 0;           // зв'язок з BMS: 2 — на зв'язку й дані свіжі, 0 — шукаю, 1 — під'єднуюсь, 3 — стану немає, 4 — пауза
+  //  зв'язок з BMS: 2 — на зв'язку й дані свіжі, 0 — шукаю, 1 — під'єднуюсь, 3 — стану немає, 4 — пауза;
+  //  1.2.0, «по черзі»: 5 — чекаю черги, 6 — BMS не чути, 7 — BMS не відповіла
+  int8_t link = 0;
   bool has = false;          // дані BMS були хоч раз
   int soc = 0;               // заряд, %
   int32_t mv = 0;            // напруга, мВ
@@ -35,6 +37,8 @@ struct BatView {
   const char* ap = "";       // її назва, «BMS-XXXX»
   const char* ver = "";      // заставка на запуску: версія ("" — не заставка)
   uint8_t test = 0;          // перевірка: 1 — усе чорне, 2 — шахівниця
+  int8_t idx = 0, count = 1; // 1.2.0: яка батарея на екрані (з 0) і скільки їх — кілька показуються по черзі
+  const char* label = "";    // назва батареї від власника ("" — немає)
 };
 
 class BatFb {
@@ -186,13 +190,26 @@ inline void batRender(BatFb& f, const BatView& v) {
     return;
   }
   const bool live = v.link == 2 && v.has;
-  static const char* const WHY[5] = {"шукаю BMS поруч", "під'єднуюсь до BMS", "", "BMS не шле стан", "пауза перед спробою"};
+  static const char* const WHY[8] = {"шукаю BMS поруч", "під'єднуюсь до BMS", "", "BMS не шле стан", "пауза перед спробою",
+                                     "чекаю опитування", "BMS не чути", "BMS не відповіла"};
+  //  1.2.0: кілька батарей — котра на екрані: назва від власника (до 7 знаків під «батарейкою») чи «1 з 2»
+  char tag[40] = "";
+  if (v.count > 1) {
+    if (v.label && v.label[0]) {
+      const char* p = v.label;
+      for (int i = 0; i < 7 && *p; i++) BatFb::nextCp(p);
+      size_t L = (size_t)(p - v.label);
+      if (L >= sizeof tag) L = sizeof tag - 1;
+      memcpy(tag, v.label, L);
+      tag[L] = 0;
+    } else snprintf(tag, sizeof tag, "%d з %d", v.idx + 1, v.count);
+  }
 
   // 1) Заряд великими цифрами й «батарейка»
   if (live) {
     snprintf(b, sizeof b, "%d%%", v.soc);
     f.text(2, 0, b, true, 3, 3);
-    const char* w = v.ma <= -300 ? "розряд" : v.ma >= 300 ? "заряд" : "спокій";
+    const char* w = tag[0] ? tag : v.ma <= -300 ? "розряд" : v.ma >= 300 ? "заряд" : "спокій";
     f.gauge(82, 1, 44, 11, v.soc, false);
     f.text(82 + (41 - BatFb::width(w)) / 2, 14, w);
   } else {
@@ -243,7 +260,7 @@ inline void batRender(BatFb& f, const BatView& v) {
     }
   } else {
     // немає зв'язку з BMS: чому, і що було
-    f.center(26, WHY[v.link >= 0 && v.link <= 4 ? v.link : 0]);
+    f.center(26, WHY[v.link >= 0 && v.link <= 7 ? v.link : 0]);
     if (v.has) {
       char d[32];
       batDur(d, sizeof d, v.ageMin);
@@ -251,6 +268,11 @@ inline void batRender(BatFb& f, const BatView& v) {
       if (BatFb::len(b) > 21) snprintf(b, sizeof b, "було %d %%", v.soc);
       f.center(36, b);
     } else f.center(36, "даних ще не було");
+    if (v.count > 1) {                              // котра батарея — рядок комірок вільний
+      if (v.label && v.label[0]) snprintf(b, sizeof b, "«%s» %d з %d", v.label, v.idx + 1, v.count);
+      if (!(v.label && v.label[0]) || BatFb::len(b) > 21) snprintf(b, sizeof b, "батарея %d з %d", v.idx + 1, v.count);
+      f.center(48, b);
+    }
   }
   //  Сторінка налаштування — підказка замість комірок (у «немає зв'язку» — нижче причини)
   if (v.setup) {
