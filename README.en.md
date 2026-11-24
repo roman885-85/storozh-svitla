@@ -1,6 +1,7 @@
 # Storozh svitla ("Power Watchman")
 
 [Українська](README.md) · [Manual (Ukrainian)](docs/ІНСТРУКЦІЯ.md) · [Wiring diagrams (PDF, Ukrainian)](docs/СХЕМИ.pdf) ·
+[Battery bridge wiring (PDF)](docs/СХЕМИ-МОСТУ.pdf) ·
 [Releases — ready-to-flash files](https://github.com/roman885-85/storozh-svitla-esp32-power-outage-telegram/releases/latest)
 
 **Telegram notifications when mains power goes off and comes back — for any building with a TOMZN / eWeLink automatic
@@ -78,7 +79,8 @@ Step by step with every setting — the [manual (Ukrainian)](docs/ІНСТРУК
   the remaining time falls under 3 h / 1 h while mains is off, BMS alarms, "BMS offline". Several BMS (up to 4) are
   polled in turn and reported separately ("Battery 2 "Garage": charge 30 %"). On the bridge: lights (two LEDs or a
   WS2812B strip) and sound (active or passive buzzer: charged, 50/30/20/10/5 %, fully discharged, BMS alarm and more;
-  critical alerts repeat, night mode, mute button) and an Open-Smart 1.8" ST7567 display (128×64). The bridge page opens
+  critical alerts repeat, night mode, mute button) and an Open-Smart 1.8" ST7567 display (128×64); the bridge page lists
+  the board's free pins and shows wiring diagrams with the chosen pin numbers. The bridge page opens
   through Storozh's page; bridge firmware can be installed **as a file through Storozh's page** (Storozh serves it to the
   bridge over its own network) or from a file URL (http/https), with rollback.
 - **Reboot buttons** for Storozh and the bridge in the "Пристрої" (devices) card and on the "Оновлення" (update) tab; for a
@@ -113,14 +115,22 @@ Step by step with every setting — the [manual (Ukrainian)](docs/ІНСТРУК
 
 ## Build from source
 
-Arduino-ESP32 **3.3.3** via `arduino-cli`, partition scheme `min_spiffs` (macOS scripts):
+On any system — **Windows, Linux, macOS**: you need Python 3.8+ and
+[`arduino-cli`](https://arduino.github.io/arduino-cli/latest/installation/); the script installs the Arduino-ESP32
+**3.3.3** core itself (partition scheme `min_spiffs`), esptool comes with it.
 
-    tools/build.sh                 # all firmwares → build/ (Storozh, beacon, battery bridge)
-    tools/flash.sh mist --new      # first flash over USB (erases flash, adds the MAC to tools/devices.txt)
-    tools/flash.sh mayak --new     # ESP32-C3 beacon
-    tools/flash.sh bms --new       # ESP32-C3 battery bridge
+    python3 tools/build.py --setup        # once: the esp32 3.3.3 core
+    python3 tools/build.py                # all firmwares → build/ (Storozh, beacon, battery bridge; or mist, mayak, bms)
+    python3 -m pip install pyserial       # for flashing over USB
+    python3 tools/flash.py mist --new     # first flash of Storozh (erases flash, adds the MAC to tools/devices.txt)
+    python3 tools/flash.py mayak --new    # ESP32-C3 beacon
+    python3 tools/flash.py bms --new      # ESP32-C3 battery bridge
 
-After that, update over the network from the device's page. Host tests (macOS, clang): `tests/watch`, `tests/lcd`,
+On Windows: `py tools\build.py`, `py tools\flash.py …`. The port is found automatically (COM…, /dev/ttyUSB…, /dev/cu.…);
+with several boards use `--port`. `tools/build.sh` and `tools/flash.sh` do the same on Linux and macOS.
+
+After that, update over the network from the device's page. Host tests (C++ with clang or g++, Node.js; page snapshots use
+headless Chrome — the path in `run.sh` is the macOS one, adjust it elsewhere): `tests/watch`, `tests/lcd`,
 `tests/yasno`, `tests/bms`, `tests/bat`, `tests/batlcd`, `tests/logring`, `tests/webguard`, `tests/devices`, `tests/batev`,
 `tests/alert`, `tests/bmspage` (each has `run.sh`).
 

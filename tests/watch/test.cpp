@@ -1,6 +1,6 @@
-// Перевірка маячків Сторожа (1.0.23) на Mac: справжній watch.cpp, а мережа, Telegram і годинник — замінники.
+// Перевірка маячків Сторожа (1.0.23) на комп'ютері: справжній watch.cpp, а мережа, Telegram і годинник — замінники.
 // Запуск: tests/watch/run.sh. Пакети маячків «MAYAK1 …» ідуть так само, як від справжніх плат (кожні 2 с з 10.77.0.x).
-//  1.0.26: стан у RTC зберігається в секундах від 1970 р. — тут годинник теж учбовий, щоб перевірка не залежала від Mac
+//  1.0.26: стан у RTC зберігається в секундах від 1970 р. — тут годинник теж учбовий, щоб перевірка не залежала від комп'ютера
 #include <ctime>
 #include <Arduino.h>
 time_t fakeTime(time_t*);
@@ -114,7 +114,7 @@ static std::vector<Sent> since() { std::vector<Sent> v(g_tg.begin() + mark, g_tg
 static bool has(const std::string& t, const char* x) { return t.find(x) != std::string::npos; }
 
 int main() {
-  S.objName = "Церква";
+  S.objName = "Офіс";
   S.avrMac = "10:20:30:40:50:73";
   S.offSec = 12; S.onSec = 10; S.lineOffSec = 15; S.lineOnSec = 10; S.genRemMin = 10;   // 1.0.29: типово 12 с
   S.notifyStart = true; S.mayakOn = false;
@@ -248,7 +248,7 @@ int main() {
   int outs = g_outStarts;
   reboot();
   run(T / 1000000 + 2);
-  check(grid.st == T_OFF && line.st == T_OFF, "1.0.29: за 2 с після запуску — уже «немає», без «визначається»");
+  check(grid.st == T_OFF && line.st == T_OFF, "1.0.29: за 2 с після запуску — вже «немає», без «визначається»");
   run(T / 1000000 + 148);
   v = since();
   bool ex1; int64_t s1 = watchGridSince(ex1);

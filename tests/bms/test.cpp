@@ -1,4 +1,4 @@
-//  Перевірка розбору кадрів JK BMS (firmware/avr-bms/jk_core.h) на Mac: tests/bms/run.sh
+//  Перевірка розбору кадрів JK BMS (firmware/avr-bms/jk_core.h) на комп'ютері: tests/bms/run.sh
 //  Кадри — tests/bms/frames.txt (зразки з esphome-jk-bms: 24S із документації, 32S із запису ефіру).
 #include <cstdio>
 #include <cstdlib>
@@ -151,10 +151,10 @@ int main() {
     CHECK(jk::parseCells(b.data(), 24, c) == 0, "кадр без узгодженої напруги відкинуто");
   }
 
-  // 8. Чи схоже оголошення на JK BMS (22.11: BMS церкви зветься «40500000000»; чужий «LEDCAR-01» теж має службу FFE0)
+  // 8. Чи схоже оголошення на JK BMS (22.11: одна з BMS зветься «40500000000»; чужий «LEDCAR-01» теж має службу FFE0)
   CHECK(jk::looksLikeJk("JK_B1A8S10P", "aa:bb:cc:dd:ee:ff", false), "назва JK_ — так, хоч яка адреса");
   CHECK(jk::looksLikeJk("JK-B2A24S15P", "", false) && jk::looksLikeJk("jk_pb2a16s", nullptr, false), "назва JK- і малими");
-  CHECK(jk::looksLikeJk("40500000000", "c8:47:80:00:00:01", true), "BMS церкви: своя назва, адреса модуля JK і служба FFE0 — так");
+  CHECK(jk::looksLikeJk("40500000000", "c8:47:80:00:00:01", true), "BMS об'єкта: своя назва, адреса модуля JK і служба FFE0 — так");
   CHECK(jk::looksLikeJk("", "C8:47:8C:F2:7E:03", true) && jk::looksLikeJk("", "20:21:11:28:18:dd", true), "без назви, адреси модулів JK (і великими)");
   CHECK(!jk::looksLikeJk("LEDCAR-01-0001", "ff:ff:11:00:00:01", true), "чужий пристрій зі службою FFE0 — ні");
   CHECK(!jk::looksLikeJk("40500000000", "c8:47:80:00:00:01", false), "адреса JK, але без служби FFE0 — ні");

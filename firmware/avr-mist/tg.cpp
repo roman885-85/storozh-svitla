@@ -47,7 +47,7 @@ static long long updOffset = 0;
 static NetworkClientSecure* cli = nullptr;
 
 //  18.11.2026 (1.0.18): о 16:20 «✅ Генератор вимкнено» стало в чергу, а Telegram з того часу на кожен запит мовчав
-//  (-11, відповідь не прийшла за 15 с), хоча інтернет у церкві був. Черга — лише в RAM, тож перезапуск її губив.
+//  (-11, відповідь не прийшла за 15 с), хоча інтернет на об'єкті був. Черга — лише в RAM, тож перезапуск її губив.
 //  Тепер: (1) після двох невдач поспіль — новий об'єкт з'єднання замість старого; (2) черга дзеркалиться в пам'ять RTC,
 //  що переживає перезапуск і оновлення (як облік світла); (3) Telegram працював, а тепер 10 хв мовчить — перезапуск.
 static volatile bool wakeSend = false;               // 1.0.29: Telegram знову відповів — чергу надсилати одразу, не чекати паузи
@@ -60,7 +60,7 @@ static NetworkClientSecure* newClient() {
   c->setHandshakeTimeout(15);
   return c;
 }
-//  1.0.32 (власник: «в домашнем HA никогда подобных проблем небыло, посмотри, может что-то можно оттуда взять»). HA
+//  1.0.32 (порівняння з Home Assistant). Home Assistant
 //  (python-telegram-bot) тримає з'єднання з Telegram відкритим і шле ним багато запитів. Сторож же на кожен запит (~6 на
 //  хвилину) робив нове рукопожаття TLS — щоразу шукав у подрібненій пам'яті два шматки по ~16,7 КБ. Тепер — одне з'єднання
 //  надовго (keep-alive): HTTPClient не локальний, бо його деструктор закриває з'єднання. Буфери — із запасу (tlspool.h).
@@ -118,7 +118,7 @@ static int rtcRestore() {                             // під qm, до зап�
     it.kb = e[3];
     memcpy(&it.pending, e + 4, 4);
     memcpy(&it.chat, e + 8, 8);
-    it.evUs = nowUs() + n;                            // %T уже вписано; +n — щоб записи черги відрізнялись
+    it.evUs = nowUs() + n;                            // %T вже вписано; +n — щоб записи черги відрізнялись
     it.fails = 0;
     if (q.size() < QMAX) { q.push_back(it); n++; }
     used += 20 + L;
@@ -132,7 +132,7 @@ static std::deque<In> inbox;                          // вхідні від з�
 int64_t tgHeartbeatUs() { return hbUs; }
 
 //  1.0.18–1.0.28 тут був tgStuck(): «Telegram 10 хв мовчить, черга не порожня — перезапуск». 20.11.2026 о 16:19 він
-//  перезапустив Сторож через секунду після «Зникло міське світло»: інтернету в церкві не було, а перезапуск його не
+//  перезапустив Сторож через секунду після «Зникло міське світло»: інтернету на об'єкті не було, а перезапуск його не
 //  повертає. Прибрано (1.0.29): черга чекає в RTC, завислий клієнт замінює resetClient().
 
 //  Під qm. Кому з одержувачів іде повідомлення цього виду (1.0.21).
@@ -338,7 +338,7 @@ static String noteErr(int code, const String& resp) {
   String e;
   if (code < 0) e = "немає зв'язку з api.telegram.org (" + String(code) + ")";
   else if (code == 401) e = "Telegram не прийняв токен бота (401)";
-  else if (code == 409) e = "цей бот уже читає інша програма (409)";
+  else if (code == 409) e = "цей бот вже читає інша програма (409)";
   else e = "HTTP " + String(code) + (desc.length() ? ": " + desc : String());
   xSemaphoreTake(qm, portMAX_DELAY);
   lastErr = e;
@@ -827,7 +827,7 @@ static void onButton(const In& m) {
       logEvent("Заявку " + String(id) + " " + nm + " відхилено (" + vname + ")");
       return answerCb(m.cb, "Не додано");
     }
-    if (i >= 0) { editMk(m.chat, m.mid, "✅ " + shown + " уже отримує сповіщення", ""); return answerCb(m.cb, "Уже додано"); }
+    if (i >= 0) { editMk(m.chat, m.mid, "✅ " + shown + " вже отримує сповіщення", ""); return answerCb(m.cb, "Вже додано"); }
     if (nrec >= MAXR) return answerCb(m.cb, "Не більше " + String(MAXR) + " одержувачів");
     Chat c[MAXR];
     int n = nrec;

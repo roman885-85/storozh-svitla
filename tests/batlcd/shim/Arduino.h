@@ -1,4 +1,4 @@
-// Мінімальна заміна Arduino для перевірки драйвера ST7567 на Mac (tests/batlcd): записує все, що пішло на дроти.
+// Мінімальна заміна Arduino для перевірки драйвера ST7567 на комп'ютері (tests/batlcd): записує все, що пішло на дроти.
 #pragma once
 #include <cstdint>
 #include <cstring>

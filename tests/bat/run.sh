@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Перевірка батареї Сторожа (bms.cpp) на Mac: tests/bat/run.sh
+# Перевірка батареї Сторожа (bms.cpp) на комп'ютері: tests/bat/run.sh
 cd "${0:A:h}" || exit 1
 F=../../firmware/avr-mist
 G=/tmp/bat-test-gen; mkdir -p $G

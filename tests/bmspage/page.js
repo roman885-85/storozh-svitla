@@ -9,7 +9,8 @@ const pack = (k, soc, i, st, lbl, age) => ({ mac: 'c8:47:80:00:00:0' + (k + 1), 
        t1: 215, tm: 263, info: 'JK_B2A8S20P, прошивка 11.26', cells, errs: k ? ['низька напруга комірки'] : [], notes: [] } });
 const D = {
   state: { ver: '1.2.0', mac: '10:20:30:40:1a:2b', ssid: 'AVR-mist-1A2B', conn: true, rssi: -61, err: '', ap: 'BMS-1A2B', setup: false, pin: '', trust: true, ota: '', var: 'usb',
-    heap: 150000, rst: 1, up: 7300, mode: 1, per: 300, b: { st: 5, mac: '', name: '', rssi: 0, rc: 25, cmds: 40, note: 'JK_B2A8S20P: опитано' }, fage: 95,
+    heap: 150000, rst: 1, up: 7300, mode: 1, per: 300, b: { st: 5, mac: '', name: '', rssi: -86, rc: 25, cmds: 40, note: 'JK_B2A8S20P: опитано', cp: [32, 0, 800], pr: [1, 24, 400], sf: 1, gf: 2, dn: 3,
+      dis: [[7100, 4300, 0x208, -88, 0], [2790, 0, 0x23e, -90, 0], [1200, 600, 0x216, -71, 61]] }, fage: 95,
     found: [{ mac: 'c8:47:80:00:00:01', name: 'JK_B2A8S20P', rssi: -70, jk: true }, { mac: 'c8:47:80:00:00:02', name: 'JK_B2A8S20P', rssi: -76, jk: true },
             { mac: 'c8:47:80:00:00:09', name: 'JK-BD6A20S', rssi: -88, jk: true }],
     list: [{ mac: 'c8:47:80:00:00:01', lbl: 'Інвертор' }, { mac: 'c8:47:80:00:00:02', lbl: 'Гараж' }],
@@ -26,4 +27,12 @@ const D = {
 const stub = '<script>const __D=' + JSON.stringify(D) + ';window.fetch=async(u,o)=>{const k=String(u).split("?")[0];return {ok:true,status:200,json:async()=>__D[k]||{ok:true}}};</script>';
 html = html.replace('</main><script>', '</main>' + stub + '<script>');
 fs.writeFileSync(process.env.OUT + '/bmspage.html', html);
+// 1.2.5: як на мості власника 24.11 — дисплей на своїх виводах (4 5 6 3 1 10), світло й звук ще не вибрано: сторінка має
+// запропонувати вільні виводи (світлодіоди GPIO0 і GPIO7, стрічка GPIO0, бузер GPIO20) і показати їх на схемах
+const D2 = JSON.parse(JSON.stringify(D));
+Object.assign(D2.alert, { light: 0, g: -1, r: -1, sp: -1, snd: 0, bz: -1, lcdPins: [4, 5, 6, 3, 1, 10], crits: [], log: [] });
+Object.assign(D2.lcd, { on: true, clk: 4, din: 5, cs: 6, rs: 3, rst: 1, bl: 10 });
+const stub2 = '<script>const __D=' + JSON.stringify(D2) + ';window.fetch=async(u,o)=>{const k=String(u).split("?")[0];return {ok:true,status:200,json:async()=>__D[k]||{ok:true}}};</script>';
+let h2 = src.slice(src.indexOf('R"PAGE(') + 7, src.indexOf(')PAGE"')).replace('</main><script>', '</main>' + stub2 + '<script>');
+fs.writeFileSync(process.env.OUT + '/bmspage_owner.html', h2);
 console.log('сторінка:', process.env.OUT + '/bmspage.html');

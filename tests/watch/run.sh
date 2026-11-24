@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Перевірка маячків (watch.cpp) на Mac: tests/watch/run.sh
+# Перевірка маячків (watch.cpp) на комп'ютері: tests/watch/run.sh
 cd "${0:A:h}" || exit 1
 F=../../firmware/avr-mist
 G=/tmp/watch-test-gen; mkdir -p $G

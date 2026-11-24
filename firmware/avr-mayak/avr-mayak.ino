@@ -136,7 +136,7 @@ static String reasonText(uint16_t r) {
     case WIFI_REASON_AUTH_EXPIRE: case WIFI_REASON_802_1X_AUTH_FAILED: case WIFI_REASON_MIC_FAILURE:
       return "пароль не підходить — перевірте на сторінці Сторожа «Точка доступу для АВР»";
     case WIFI_REASON_NO_AP_FOUND: return "мережі не видно поруч — Сторож увімкнений? Назва правильна?";
-    case WIFI_REASON_ASSOC_TOOMANY: return "Сторож уже має забагато пристроїв у своїй мережі";
+    case WIFI_REASON_ASSOC_TOOMANY: return "Сторож вже має забагато пристроїв у своїй мережі";   // 1.0.19: «вже», не «уже»
     case WIFI_REASON_ASSOC_LEAVE: return String();          // це ми самі перепід'єднуємось
     default: return r ? "не вдалося під'єднатись (код " + String(r) + ")" : String();
   }
@@ -367,7 +367,7 @@ void loop() {
   }
   bool conn = WiFi.isConnected();
   if (conn) { if (!linkSince) linkSince = now | 1; } else linkSince = 0;
-  //  під'єднався — сторінку налаштування вимкнути: за хвилину, якщо телефон уже відключився й минуло 3 хв від її
+  //  під'єднався — сторінку налаштування вимкнути: за хвилину, якщо телефон вже відключився й минуло 3 хв від її
   //  увімкнення (встигнути під'єднатись після кнопки BOOT), і в будь-якому разі за 5 хв на зв'язку
   if (setupOn && linkSince && ((now - linkSince > 60000 && WiFi.softAPgetStationNum() == 0 && now - setupSince > 180000) || now - linkSince > 300000)) stopSetup();
   if (conn) {

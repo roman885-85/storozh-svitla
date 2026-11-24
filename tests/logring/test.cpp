@@ -1,4 +1,4 @@
-//  Перевірка кільця журналу (firmware/avr-mist/logring.h) на Mac: tests/logring/run.sh
+//  Перевірка кільця журналу (firmware/avr-mist/logring.h) на комп'ютері: tests/logring/run.sh
 //  Звіряємо з простою моделлю (std::deque) на випадкових записах; збірка з перевіркою меж пам'яті (-fsanitize=address).
 #include <cstdio>
 #include <cstdlib>

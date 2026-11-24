@@ -8,7 +8,7 @@
     Правило власника: прилад сам у флеш не пише.  */
 struct Settings {
   String objName;                  // як називати об'єкт у повідомленнях
-  String objIcon;                  // 1.0.47: значок перед назвою в повідомленнях («⛪ Церква», «📍 Офіс»); порожньо — без значка
+  String objIcon;                  // 1.0.47: значок перед назвою в повідомленнях («🏢 Офіс», «📍 Склад»); порожньо — без значка
   String staSsid, staPass;         // Wi-Fi церковного роутера
   String staBssid;                 // бажана точка роутера (BSSID), "" — будь-яка, найсильніша (1.0.3)
   String apSsid, apPass;           // точка моста для АВР і маячка
@@ -83,7 +83,7 @@ inline String objIco() { return S.objIcon.length() ? S.objIcon + " " : String();
 
 void   settingsLoad();
 bool   settingsSave();
-void   settingsFactoryReset();      // стерти все; після нього settingsSave() уже нічого не пише — лише перезапуск
+void   settingsFactoryReset();      // стерти все; після нього settingsSave() вже нічого не пише — лише перезапуск
 bool   settingsResetPrefs();        // «Скинути налаштування»: усе, крім Wi-Fi, точки для АВР, АВР, бота й пароля (1.0.15)
 String defaultApSsid();
 String defaultPass();

@@ -1,4 +1,4 @@
-// Перевірка батареї Сторожа (bms.cpp, 1.0.36) на Mac: справжній bms.cpp, а міст, Telegram, годинник і стан міста —
+// Перевірка батареї Сторожа (bms.cpp, 1.0.36) на комп'ютері: справжній bms.cpp, а міст, Telegram, годинник і стан міста —
 // замінники. Запуск: tests/bat/run.sh. Пакети «BMS1 …» — такі самі, як шле міст батареї (firmware/avr-bms).
 #include <Arduino.h>
 #include "../../firmware/avr-mist/bms.cpp"
@@ -117,7 +117,7 @@ static bool has(const std::string& t, const char* x) { return t.find(x) != std::
 static void jsonOut(const char* name) { std::ofstream(std::string("/tmp/bat-test-") + name + ".json") << bmsJson().s; }
 
 int main() {
-  S.objName = "Церква";
+  S.objName = "Офіс";
   S.bmsOn = true;
 
   puts("0) Назви тривог — ті самі, що в мосту (jk_core.h)");

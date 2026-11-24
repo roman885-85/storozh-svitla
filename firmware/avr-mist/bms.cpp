@@ -1,5 +1,5 @@
 /*  Батарея (1.0.36, 22.11.2026). Власник: «добавляй функцию мониторинга бмс через esp 32 c3», «с3 держит постоянную
-    связь с бмс, а сторож лишь читает эти данные из с3», «в ha эта работа ранее была организована».
+    связь с бмс, а сторож лишь читает эти данные из с3».
 
     Міст батареї (ESP32-C3 біля JK BMS, firmware/avr-bms) під'єднаний до BMS по Bluetooth і кожні 5 с шле Сторожу
     UDP «BMS1 <MAC мосту> ключ=значення …» на порт маячків (watch.cpp передає сюди). Сторож лише читає.
@@ -10,12 +10,12 @@
     назва від власника (пробіли — «_»). Тут до 4 батарей, у кожної свої сповіщення; «дані свіжі» й «пропала» — з
     урахуванням періоду. Міст до 1.2.0 (без bi/bn) — одна батарея, усе як було.
 
-    Сповіщення — як у HA власника (notify/automations.json), лише з галочкою «Сповіщати про батарею» (S.bmsOn):
+    Сповіщення — як у Home Assistant (notify/automations.json), лише з галочкою «Сповіщати про батарею» (S.bmsOn):
       • «🔋 Заряд батареї N %» — заряд опустився нижче 50, 30, 20, 10 %, коли міського світла немає;
       • «⏳ Батареї вистачить менше ніж на три години / на годину» — за середнім розрядом за 10 хв, 2 хв поспіль, без світла;
       • «🔋 BMS повідомляє: …» — тривога BMS (чи BMS вимкнула розряд) тримається 1 хв і змінилась;
       • 15 хв без даних від BMS («по черзі» — щонайменше два періоди й 5 хв) — «пропала» адміністраторам без звуку,
-        одне повідомлення на одну втрату (журнал HA, Т119), і «знову на зв'язку» після хвилини даних; мовчить сам міст —
+        одне повідомлення на одну втрату (як у Home Assistant), і «знову на зв'язку» після хвилини даних; мовчить сам міст —
         одне повідомлення на всі батареї; після запуску Сторожа без жодних даних — лише через годину.
       Кілька батарей — у заголовку котра: «Батарея 2 «Гараж»: заряд 30 %».
     Отримують: у кого в «🔔 Сповіщення» ввімкнено «🔋 Батарея», і адміністратори.  */
@@ -30,13 +30,13 @@ namespace {
 constexpr int64_t SEC = 1000000;
 constexpr int64_t BRIDGE_FRESH = 30 * SEC;     // міст шле кожні 5 с
 constexpr int64_t DATA_FRESH = 60 * SEC;       // BMS шле кадр щосекунди; міст передає вік кадру
-constexpr int64_t LOST_AFTER = 15 * 60 * SEC;  // як у HA: «плата BMS пропала» — 15 хв
+constexpr int64_t LOST_AFTER = 15 * 60 * SEC;  // як у Home Assistant: «плата BMS пропала» — 15 хв
 constexpr int64_t LOST_BOOT = 60 * 60 * SEC;   // після запуску Сторожа, якщо даних так і не було
-constexpr int64_t BACK_AFTER = 60 * SEC;       // «знову на зв'язку» — після хвилини даних (HA: 1 хв)
+constexpr int64_t BACK_AFTER = 60 * SEC;       // «знову на зв'язку» — після хвилини даних (Home Assistant: 1 хв)
 constexpr int64_t BACK_MAX = 15 * 60 * SEC;    // міст повернувся, а якась BMS — ні: сказати за 15 хв однаково
-constexpr int64_t ERR_HOLD = 60 * SEC;         // тривога BMS — 1 хв (HA)
-constexpr int64_t RT_HOLD = 120 * SEC;         // «вистачить менше ніж…» — 2 хв (HA)
-constexpr int64_t AVG_TAU = 600 * SEC;         // середній розряд — за 10 хв (HA: battery_discharge_power_10min)
+constexpr int64_t ERR_HOLD = 60 * SEC;         // тривога BMS — 1 хв (як у Home Assistant)
+constexpr int64_t RT_HOLD = 120 * SEC;         // «вистачить менше ніж…» — 2 хв (як у Home Assistant)
+constexpr int64_t AVG_TAU = 600 * SEC;         // середній розряд — за 10 хв (Home Assistant: battery_discharge_power_10min)
 constexpr uint32_t DIS_OFF = 1u << 31;         // наш біт «BMS вимкнула розряд» (біти 29–31 BMS не тривожні — їх зняли)
 constexpr int MAXB = 4;                        // батарей на одному мості (міст 1.2.0: до 4 по черзі)
 
@@ -102,12 +102,12 @@ const uint8_t SOC_L[4] = {50, 30, 20, 10};
 const int RT_L[2] = {180, 60};        // хвилин
 int64_t loopUs = 0;                  // останній прохід bmsLoop (раз на секунду)
 
-void resetAll() { Br = Bridge(); for (auto& b : P) b = Bat(); loopUs = 0; }   // для перевірки на Mac (tests/bat)
+void resetAll() { Br = Bridge(); for (auto& b : P) b = Bat(); loopUs = 0; }   // для перевірки на комп'ютері (tests/bat)
 
 String obj() { return S.objName.length() ? S.objName : String("Об'єкт"); }
 String head(const char* icon, const String& title) { return String(icon) + " <b>" + title + "</b>\n" + objIco() + htmlEsc(obj()) + " · %T"; }
 
-//  «53,25» з 53250 (мВ, 2 знаки) — коми, як у повідомленнях HA
+//  «53,25» з 53250 (мВ, 2 знаки) — коми, як у повідомленнях Home Assistant
 String fix(long v, int div, int dec) {
   bool neg = v < 0;
   unsigned long a = neg ? -v : v;
@@ -247,7 +247,7 @@ String socLine(const Bat& b) { return "Заряд " + String((int)b.soc) + " %, 
 //  Сповіщення однієї батареї, поки її дані свіжі: тривоги BMS, рівні заряду й «вистачить на…» без світла
 void batAlerts(int k, int64_t now, bool gridOff) {
   Bat& b = P[k];
-  //  Тривоги BMS: набір змінився й тримається хвилину; оголошуємо лише непорожній (як у HA)
+  //  Тривоги BMS: набір змінився й тримається хвилину; оголошуємо лише непорожній (як у Home Assistant)
   uint32_t a = alarms(b);
   if (a != b.errCand) { b.errCand = a; b.errCandUs = now; }
   if (a != b.errShown && now - b.errCandUs >= ERR_HOLD) {
@@ -277,14 +277,14 @@ void batAlerts(int k, int64_t now, bool gridOff) {
     send(m, false);
   }
 
-  //  «Вистачить менше ніж на 3 год / 1 год» — 2 хв поспіль, без міського світла (як у HA); 20 % запасу на «перезвести»
+  //  «Вистачить менше ніж на 3 год / 1 год» — 2 хв поспіль, без міського світла (як у Home Assistant); 20 % запасу на «перезвести»
   for (int i = 1; i >= 0; i--) {
     if (rt >= 0 && rt < RT_L[i]) { if (!b.rtBelow[i]) b.rtBelow[i] = now | 1; }
     else b.rtBelow[i] = 0;
     if (!b.rtArmed[i] && (rt < 0 || rt >= RT_L[i] * 6 / 5)) b.rtArmed[i] = true;
     if (b.rtArmed[i] && b.rtBelow[i] && now - b.rtBelow[i] >= RT_HOLD) {
       b.rtArmed[i] = false;
-      if (i == 1) b.rtArmed[0] = false;          // уже «менше години» — «менше трьох» після нього не потрібне
+      if (i == 1) b.rtArmed[0] = false;          // вже «менше години» — «менше трьох» після нього не потрібне
       if (gridOff && S.bmsOn) {
         String w = String("вистачить менше ніж на ") + (i == 1 ? "годину" : "три години");
         send(head("⏳", ttl(k, "Батареї " + w, w)) + "\nПриблизно на " + fmtDur((int64_t)rt * 60) + " — до повного розряду, за середнім розрядом " +

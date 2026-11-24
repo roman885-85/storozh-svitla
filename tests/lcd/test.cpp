@@ -1,4 +1,4 @@
-// Картинки екрана Nokia 5110 для перевірки на Mac: tests/lcd/run.sh → tests/lcd/out/*.pgm (і PNG через sips)
+// Картинки екрана Nokia 5110 для перевірки на комп'ютері: tests/lcd/run.sh → tests/lcd/out/*.pgm (і PNG через sips)
 #include "../../firmware/avr-mist/lcd_core.h"
 #include <cstdio>
 #include <vector>
@@ -26,9 +26,9 @@ int main() {
   LcdView v;
   //  тривалості (1.0.26): словами, щонайбільше 14 знаків
   struct { long long s; bool ex; const char* want; } D[] = {
-    {20, true, "менше хвилини"}, {20, false, "понад хвилину"}, {180, true, "уже 3 хв"}, {2460, false, "понад 41 хв"},
-    {3900, true, "уже 1 год 5 хв"}, {3900 + 600, true, "1 год 15 хв"}, {3900, false, "понад 1 год"}, {86399, true, "23 год 59 хв"},
-    {2 * 86400 + 3 * 3600 + 5, true, "уже 2 дн 3 год"}, {9 * 86400, false, "понад 9 дн"}};
+    {20, true, "менше хвилини"}, {20, false, "понад хвилину"}, {180, true, "вже 3 хв"}, {2460, false, "понад 41 хв"},
+    {3900, true, "вже 1 год 5 хв"}, {3900 + 600, true, "1 год 15 хв"}, {3900, false, "понад 1 год"}, {86399, true, "23 год 59 хв"},
+    {2 * 86400 + 3 * 3600 + 5, true, "вже 2 дн 3 год"}, {9 * 86400, false, "понад 9 дн"}};
   int bad = 0;
   for (auto& d : D) {
     char o[48];

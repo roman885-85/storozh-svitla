@@ -1,14 +1,14 @@
 /*  Міст батареї «Сторожа світла» — ESP32-C3 біля JK BMS (плата AirM2M / LuatOS «ESP32-C3 Core», як маячок).
  *
  *  Власник 22.11.2026: «добавляй функцию мониторинга бмс через esp 32 c3», «с3 держит постоянную связь с бмс, а сторож
- *  лишь читает эти данные из с3», «в ha эта работа ранее была организована»; прошивку обрав власну, як у маячка.
+ *  лишь читает эти данные из с3»; прошивку обрав власну, як у маячка.
  *
  *  Плата під'єднана до JK BMS по Bluetooth і кожні 5 с каже Сторожу, що з батареєю: UDP «BMS1 …» на 10.77.0.1:47801
  *  (той самий порт, що й маячки). Сторож до BMS не під'єднується й нічого їй не пише.
  *
- *  Як у мосту HA (esphome-jk-bms, jk_bms_ble): після під'єднання — запит «хто ти» (0x97), далі запит стану (0x96) кожні
+ *  Як у ESPHome-мосту для Home Assistant (esphome-jk-bms, jk_bms_ble): після під'єднання — запит «хто ти» (0x97), далі запит стану (0x96) кожні
  *  5 с, доки не прийде перший кадр стану; потім BMS шле кадри сама, а плата лише слухає. Інших команд плата не шле.
- *  BMS пищить на кожне під'єднання (журнал HA 08.11: «кожне перепідключення — писк», сотня за добу на слабкому сигналі),
+ *  BMS пищить на кожне під'єднання (досвід Home Assistant: «кожне перепідключення — писк», сотня за добу на слабкому сигналі),
  *  тож після короткого з'єднання пауза перед новим росте: 30 с, 1, 2, 5 хв; після довгого — 10 с.
  *  Живити плату — від ДБЖ чи інвертора, не з міської розетки: батарея важлива саме тоді, коли світла немає.
  *
@@ -20,7 +20,7 @@
  *    • Два режими: «одна BMS — постійне з'єднання» (як було; типово) і «кілька BMS — по черзі»: до 4 BMS, раз на
  *      період (1–30 хв) міст під'єднується до кожної, бере кадр стану й від'єднується — кожна BMS пищить раз на період.
  *    • Сторожу — окремий пакет на кожну батарею (bi — номер, bn — скільки, per — період, lbl — назва); Сторож 1.0.48+.
- *    • Світло й звук — alerts.h (події — batev_core.h, мелодії й кадри — alert_core.h, обидва перевірено на Mac).
+ *    • Світло й звук — alerts.h (події — batev_core.h, мелодії й кадри — alert_core.h, обидва перевірено на комп'ютері).
  *    • Дисплей: кілька батарей — по черзі, по 5 с.
  *
  *  Налаштування з телефона — як у маячка: без мережі Сторожа (ще не задано, 3 хв без зв'язку або кнопка BOOT 3 с)
@@ -46,6 +46,7 @@
 #include <esp_mac.h>
 #include <esp_chip_info.h>
 #include <BLEDevice.h>
+#include "host/ble_gap.h"            // 1.2.6: NimBLE (так зібрано ядро 3.3.3 для C3) — події GAP, стан з'єднання
 #include <HTTPUpdate.h>
 #include <NetworkClientSecure.h>
 #include <esp_ota_ops.h>
@@ -137,6 +138,88 @@ static BLERemoteCharacteristic* wch = nullptr;
 static volatile bool dumpOn = false, dumpReady = false;
 static uint8_t dumpBuf[jk::FRAME];
 static char goodMac[18] = "";           // BMS, що вже дала стан у цьому запуску (лише в RAM)
+
+//  1.2.6 (власник 24.11.2026: «мост бмс постоянно теряет связь с аккумулятором … явная проблема в работе с кодом или
+//  протоколом»). Причини розривів — від самого стека Bluetooth (NimBLE): слухач подій GAP пише код HCI, скільки тривало
+//  з'єднання, сигнал і тишу перед розривом; параметри з'єднання і чи просила BMS їх змінити. Лише в RAM.
+struct DisRec { uint32_t atS, durS; uint16_t reason; int16_t rssi; uint16_t quietS; };
+static DisRec disLog[8];
+static volatile uint32_t disCnt = 0, peerReqs = 0, stuckFix = 0, ghostFix = 0, linkUpMs = 0;
+static volatile uint16_t linkH = BLE_HS_CONN_HANDLE_NONE;   // з'єднання на рівні радіо (за подіями GAP), хоч би що думала бібліотека
+static volatile uint16_t cpItvl = 0, cpLat = 0, cpTmo = 0, prItvl = 0, prTmo = 0;
+static struct ble_gap_event_listener gapL;
+static void cpRead(uint16_t h) {
+  struct ble_gap_conn_desc d;
+  if (ble_gap_conn_find(h, &d) == 0) { cpItvl = d.conn_itvl; cpLat = d.conn_latency; cpTmo = d.supervision_timeout; }
+}
+static int gapListen(struct ble_gap_event* e, void*) {      // задача хоста NimBLE — лише записати
+  if (e->type == BLE_GAP_EVENT_CONNECT && e->connect.status == 0) { linkH = e->connect.conn_handle; linkUpMs = millis() | 1; cpRead(e->connect.conn_handle); }
+  else if (e->type == BLE_GAP_EVENT_CONN_UPDATE && e->conn_update.status == 0) cpRead(e->conn_update.conn_handle);
+  else if (e->type == BLE_GAP_EVENT_CONN_UPDATE_REQ || e->type == BLE_GAP_EVENT_L2CAP_UPDATE_REQ) {
+    peerReqs++;
+    if (e->conn_update_req.peer_params) { prItvl = e->conn_update_req.peer_params->itvl_max; prTmo = e->conn_update_req.peer_params->supervision_timeout; }
+  } else if (e->type == BLE_GAP_EVENT_DISCONNECT) {
+    DisRec r;
+    uint32_t now = millis();
+    r.atS = now / 1000;
+    r.durS = linkUpMs ? (now - linkUpMs) / 1000 : 0;
+    r.reason = (uint16_t)e->disconnect.reason;
+    r.rssi = (int16_t)curRssi;
+    int k = curPk;
+    uint32_t q = (k >= 0 && k < MAX_PK && R[k].atMs) ? agoMs(R[k].atMs) / 1000 : 0;
+    r.quietS = q > 65535 ? 65535 : (uint16_t)q;
+    portENTER_CRITICAL(&mux);
+    disLog[disCnt % 8] = r;
+    disCnt++;
+    portEXIT_CRITICAL(&mux);
+    if (linkH == e->disconnect.conn.conn_handle) linkH = BLE_HS_CONN_HANDLE_NONE;
+    linkUpMs = 0;
+  }
+  return 0;
+}
+static BLEClient* gcl = nullptr;             // єдиний клієнт (для пошуку — перевірити, чи не «завис»)
+static bool linkAlive(BLEClient* cl) { uint16_t h = cl->getConnId(); return h != BLE_HS_CONN_HANDLE_NONE && ble_gap_conn_find(h, nullptr) == 0; }
+//  1.2.6. Ядро 3.3.3 (NimBLE): якщо з'єднання обривається між подією CONNECT і рядком «m_isConnected = true» у
+//  BLEClient::connect(), клієнт лишається «на зв'язку» без з'єднання — і BLEScan відкидає всі оголошення цієї BMS
+//  («Client … connected - ignoring event»): міст її «не чує» аж до перезапуску. 24.11.2026: 15 хв «вибраної BMS не чути»,
+//  а після перезапуску мосту — з першого ж пошуку (−90 дБм). Скидаємо бібліотечним же обробником розриву (public static).
+static bool unstick(BLEClient* cl) {
+  if (!cl || !cl->isConnected() || linkAlive(cl)) return false;
+  struct ble_gap_event e;
+  memset(&e, 0, sizeof e);
+  e.type = BLE_GAP_EVENT_DISCONNECT;
+  e.disconnect.reason = BLE_HS_ENOTCONN;      // не «скидання хоста» — звичайна гілка обробника
+  e.disconnect.conn.conn_handle = cl->getConnId();
+  BLEClient::handleGAPEvent(&e, cl);
+  stuckFix++;
+  return true;
+}
+//  1.2.7. Зворотний випадок: бібліотека вважає, що НЕ на зв'язку, а з'єднання на рівні радіо є («привид»). Так буває,
+//  коли BLEClient::connect() не дочекався обміну MTU (31 с) чи обмін не почався, і повернув «не вдалося», не розірвавши
+//  з'єднання: BMS тримає його й не оголошує себе — міст її «не чує» до перезапуску. 24.11.2026, одразу після оновлення на 1.2.6: подія CONNECT
+//  (параметри записано), розриву немає, connect() — «не вдалося», далі «не чути». Розриваємо самі.
+static bool dropGhost(BLEClient* cl) {
+  uint16_t h = linkH;
+  if (h == BLE_HS_CONN_HANDLE_NONE) return false;
+  if (cl && cl->isConnected() && cl->getConnId() == h) return false;      // це наше живе з'єднання
+  if (ble_gap_conn_find(h, nullptr) != 0) { linkH = BLE_HS_CONN_HANDLE_NONE; return false; }
+  ble_gap_terminate(h, BLE_ERR_REM_USER_CONN_TERM);
+  ghostFix++;
+  for (int i = 0; i < 30 && linkH == h; i++) delay(100);                  // подія розриву — до 3 с
+  return true;
+}
+//  1.2.6: нагляд за з'єднанням 8 с замість 4 с бібліотеки (BMS може «пропасти» на кілька секунд, поки Wi-Fi тримає
+//  радіо); інтервал 30–50 мс — як типово в Bluedroid, на якому працював ESPHome для Home Assistant.
+static void wantParams(BLEClient* cl) {
+  struct ble_gap_upd_params p;
+  memset(&p, 0, sizeof p);
+  p.itvl_min = 24;
+  p.itvl_max = 40;
+  p.latency = 0;
+  p.supervision_timeout = 800;
+  ble_gap_update_params(cl->getConnId(), &p);
+}
+
 
 static void led(int pin, int v) { if (leds) digitalWrite(pin, v); }
 
@@ -268,12 +351,14 @@ static bool jkLike(const String& name, const String& mac, bool svc) {
 
 //  Пошук (5 с, активний — щоб назва приходила завжди; у пасивному JK буває без назви). Заповнює found[] для сторінки,
 //  повертає знайдені з переліку want (за MAC, будь-які) і, якщо best ≠ nullptr, найближчу схожу на JK.
-static void scanBle(const char want[][18], int nw, BLEAdvertisedDevice* got, bool* have, BLEAdvertisedDevice* best, bool* haveBest) {
+static void scanBle(const char want[][18], int nw, BLEAdvertisedDevice* got, bool* have, BLEAdvertisedDevice* best, bool* haveBest, bool light = false) {
+  unstick(gcl);
+  dropGhost(gcl);
   BLEScan* sc = BLEDevice::getScan();
   sc->setActiveScan(true);
-  sc->setInterval(100);
-  sc->setWindow(99);
-  BLEScanResults* r = sc->start(5, false);
+  sc->setInterval(light ? 160 : 100);          // 1.2.6: під час з'єднання — 10 мс зі 100 (як ESPHome), а не 99 %
+  sc->setWindow(light ? 16 : 99);
+  BLEScanResults* r = sc->start(light ? 3 : 5, false);
   Found tmp[8];
   int n = 0, bestR = -999;
   for (int k = 0; k < nw; k++) have[k] = false;
@@ -316,11 +401,11 @@ static bool scanJk(BLEAdvertisedDevice& out) {
   if (hb) out = best;
   return hb;
 }
-static void scanOnly() {                         // «Шукати BMS» зі сторінки: лише оновити список для сторінки
+static void scanOnly(bool light = false) {       // «Шукати BMS» зі сторінки: лише оновити список для сторінки
   char w[1][18] = {""};
   BLEAdvertisedDevice g[1];
   bool h[1];
-  scanBle(w, 0, g, h, nullptr, nullptr);
+  scanBle(w, 0, g, h, nullptr, nullptr, light);
 }
 
 static bool setupChars(BLEClient* cl) {
@@ -370,7 +455,8 @@ static bool pollOne(BLEClient* cl, int i, BLEAdvertisedDevice& d, const char* ma
   bst = ST_CONN;
   bool ok = cl->connect(d.getAddress());
   bleBeat = millis();
-  if (!ok) setNote("не вдалося під'єднатися до " + nm);
+  if (ok && !linkAlive(cl)) { unstick(cl); ok = false; setNote(nm + ": з'єднання обірвалось одразу після під'єднання (слабкий сигнал?)"); }
+  else if (!ok) { setNote("не вдалося під'єднатися до " + nm); dropGhost(cl); }
   else ok = setupChars(cl);
   bool got = false;
   if (ok) {
@@ -378,12 +464,12 @@ static bool pollOne(BLEClient* cl, int i, BLEAdvertisedDevice& d, const char* ma
     R[i].st = ST_NOSTAT;
     bst = ST_NOSTAT;
     uint32_t t0 = millis(), lastReq = 0;
-    //  1.2.2: «хто ти» — у КОЖНОМУ з'єднанні, далі запит стану через 2 с (як «одна BMS» і міст HA, jk_bms_ble).
+    //  1.2.2: «хто ти» — у КОЖНОМУ з'єднанні, далі запит стану через 2 с (як «одна BMS» і ESPHome-міст для Home Assistant, jk_bms_ble).
     //  23.11.2026 о 22:55 друге опитування без «хто ти» (лише запит стану, тричі за 12 с) BMS JK_B1A8S10P (прошивка
     //  15.24) мовчала, а перше, з ним, — відповіла за 2 с.
     sendCmd(jk::CMD_INFO);
     bool asked = false;
-    while (cl->isConnected() && millis() - t0 < 14000) {
+    while (cl->isConnected() && linkAlive(cl) && millis() - t0 < 14000) {
       bleBeat = millis();
       if (gotStatus) { got = true; break; }
       uint32_t now = millis();
@@ -393,7 +479,9 @@ static bool pollOne(BLEClient* cl, int i, BLEAdvertisedDevice& d, const char* ma
     if (cl->isConnected()) { int r = cl->getRssi(); if (r) { curRssi = r; R[i].rssi = r; } }
     setNote(nm + (got ? ": опитано" : ": стану не дала — спробую пізніше"));
   }
-  if (cl->isConnected()) cl->disconnect();
+  if (cl->isConnected() && linkAlive(cl)) cl->disconnect();
+  else unstick(cl);
+  dropGhost(cl);
   wch = nullptr;
   R[i].polls++;
   if (!got) R[i].fails++;
@@ -443,9 +531,11 @@ static void cycleStep(BLEClient* cl) {
 //  «по черзі» — cycleStep.
 static void bleTask(void*) {
   BLEDevice::init("");
-  BLEDevice::setPower(ESP_PWR_LVL_P20);           // +20 дБм — як у панелі HA: на межі сигналу BMS рве з'єднання й пищить
+  BLEDevice::setPower(ESP_PWR_LVL_P20);           // +20 дБм — як у панелі Home Assistant: на межі сигналу BMS рве з'єднання й пищить
   BLEDevice::setMTU(247);                         // більші шматки кадру — менше повідомлень
   BLEClient* cl = BLEDevice::createClient();
+  gcl = cl;
+  ble_gap_event_listener_register(&gapL, gapListen, nullptr);
   uint32_t backoff = 0;
   for (;;) {
     bleBeat = millis();
@@ -485,9 +575,11 @@ static void bleTask(void*) {
     bool changed = false;
     bool ok = cl->connect(t.getAddress());
     bleBeat = millis();
-    if (!ok) setNote("не вдалося під'єднатися до " + tn);
+    if (ok && !linkAlive(cl)) { unstick(cl); ok = false; setNote("з'єднання з " + tn + " обірвалось одразу після під'єднання (слабкий сигнал?)"); }
+    else if (!ok) { setNote("не вдалося під'єднатися до " + tn); dropGhost(cl); }
     else ok = setupChars(cl);
     if (ok) {
+      wantParams(cl);
       reconnects++;
       began = millis();
       connSinceMs = began | 1;
@@ -495,10 +587,11 @@ static void bleTask(void*) {
       sendCmd(jk::CMD_INFO);                      // як jk_bms_ble: одразу — «хто ти»
       uint32_t lastReq = millis() - 3000;         // а запит стану — через 2 с і далі кожні 5 с, доки не піде стан
       int reqs = 0;
-      while (cl->isConnected()) {
+      uint32_t rssiMs = 0;
+      while (cl->isConnected() && linkAlive(cl)) {
         bleBeat = millis();
         if (gen != cfgGen) { changed = true; setNote("налаштування змінено — під'єднуюсь наново"); break; }
-        if (scanReq) { scanReq = false; scanOnly(); }      // пошук для сторінки — і під час з'єднання
+        if (scanReq) { scanReq = false; scanOnly(true); }  // пошук для сторінки — і під час з'єднання, але щадний
         uint32_t now = millis();
         if (!gotStatus) {
           if (now - lastReq >= 5000) {
@@ -512,15 +605,24 @@ static void bleTask(void*) {
           uint32_t age = agoMs(R[0].atMs);        // 1.1.1: не «now − мітка»: кадр міг прийти вже після now
           bst = age < 15000 ? ST_OK : ST_NOSTAT;
           if (age > 60000) { setNote("BMS замовкла на хвилину — перепід'єднуюсь"); break; }
+          if (age > 20000 && now - lastReq >= 20000) { sendCmd(jk::CMD_CELLS); lastReq = now; }   // 1.2.6: тиша 20 с — нагадати
         }
         R[0].st = bst;
-        int r = cl->getRssi();
-        if (r) { curRssi = r; R[0].rssi = r; }
+        if (now - rssiMs >= 5000) {               // 1.2.6: сигнал раз на 5 с (було щопів секунди)
+          rssiMs = now;
+          int r = cl->getRssi();
+          if (r) { curRssi = r; R[0].rssi = r; }
+        }
         delay(500);
       }
-      if (cl->isConnected()) cl->disconnect();
-      else if (gotStatus) setNote("BMS розірвала з'єднання (" + String((millis() - began) / 1000) + " с на зв'язку)");
-    } else if (cl->isConnected()) cl->disconnect();
+      if (cl->isConnected() && linkAlive(cl)) cl->disconnect();
+      else {
+        unstick(cl);
+        if (gotStatus) setNote("зв'язок з BMS обірвався (" + String((millis() - began) / 1000) + " с на зв'язку) — причина в «Розривах»");
+      }
+    } else if (cl->isConnected() && linkAlive(cl)) cl->disconnect();
+    else unstick(cl);
+    dropGhost(cl);
     wch = nullptr;
     connSinceMs = 0;
     if (changed) { backoff = 0; waitUntilMs = 0; delay(500); continue; }   // змінили власноруч — одразу
@@ -618,7 +720,7 @@ static String reasonText(uint16_t r) {
     case WIFI_REASON_AUTH_EXPIRE: case WIFI_REASON_802_1X_AUTH_FAILED: case WIFI_REASON_MIC_FAILURE:
       return "пароль не підходить — перевірте на сторінці Сторожа «Точка доступу для АВР»";
     case WIFI_REASON_NO_AP_FOUND: return "мережі не видно поруч — Сторож увімкнений? Назва правильна?";
-    case WIFI_REASON_ASSOC_TOOMANY: return "Сторож уже має забагато пристроїв у своїй мережі";
+    case WIFI_REASON_ASSOC_TOOMANY: return "Сторож вже має забагато пристроїв у своїй мережі";
     case WIFI_REASON_ASSOC_LEAVE: return String();
     default: return r ? "не вдалося під'єднатись (код " + String(r) + ")" : String();
   }
@@ -723,7 +825,19 @@ static void hState() {
              "\",\"heap\":" + String((unsigned long)ESP.getFreeHeap()) + ",\"rst\":" + String((int)esp_reset_reason()) + ",\"up\":" + String((unsigned long)(millis() / 1000)) +
              ",\"mode\":" + String((int)pollMode) + ",\"per\":" + String((unsigned)pollSec);
   o += ",\"b\":{\"st\":" + String(bst) + ",\"mac\":\"" + String(mac) + "\",\"name\":\"" + jsonEsc(name) + "\",\"rssi\":" + String((int)curRssi) +
-       ",\"rc\":" + String((unsigned long)reconnects) + ",\"cmds\":" + String((unsigned long)cmds) + ",\"note\":\"" + jsonEsc(getNote()) + "\"}";
+       ",\"rc\":" + String((unsigned long)reconnects) + ",\"cmds\":" + String((unsigned long)cmds) + ",\"note\":\"" + jsonEsc(getNote()) + "\"" +
+       ",\"cp\":[" + String(cpItvl) + "," + String(cpLat) + "," + String(cpTmo) + "],\"pr\":[" + String((unsigned long)peerReqs) + "," + String(prItvl) + "," + String(prTmo) +
+       "],\"sf\":" + String((unsigned long)stuckFix) + ",\"gf\":" + String((unsigned long)ghostFix) + ",\"dn\":" + String((unsigned long)disCnt) + ",\"dis\":[";
+  {
+    DisRec dl[8];
+    uint32_t dc;
+    portENTER_CRITICAL(&mux); memcpy(dl, disLog, sizeof dl); dc = disCnt; portEXIT_CRITICAL(&mux);
+    for (uint32_t j = 0; j < 8 && j < dc; j++) {
+      const DisRec& x = dl[(dc - 1 - j) % 8];
+      o += String(j ? "," : "") + "[" + x.atS + "," + x.durS + "," + x.reason + "," + x.rssi + "," + x.quietS + "]";
+    }
+  }
+  o += "]}";
   o += ",\"fage\":" + String(fat ? (long)(agoMs(foundAtMs) / 1000) : -1L) + ",\"found\":[";
   for (int i = 0; i < nf; i++) o += String(i ? "," : "") + "{\"mac\":\"" + fl[i].mac + "\",\"name\":\"" + jsonEsc(fl[i].name) + "\",\"rssi\":" + fl[i].rssi + ",\"jk\":" + (fl[i].jk ? "true" : "false") + "}";
   o += "],\"list\":[";
@@ -1055,6 +1169,7 @@ void setup() {
   static const char* hdrs[] = {"Accept-Encoding"};
   web.collectHeaders(hdrs, 1);
   web.on("/", HTTP_GET, hRoot);
+  web.on("/schemes", HTTP_GET, hRoot);   // 1.2.4: та сама сторінка — усі схеми підключення для друку (page.h, SCH); 1.2.5 — виводи видно й запропоновано
   web.on("/state", HTTP_GET, hState);
   web.on("/scan", HTTP_GET, hScan);
   web.on("/save", HTTP_POST, hSave);

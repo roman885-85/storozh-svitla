@@ -223,7 +223,7 @@ static bool snapshot(YQueue& y, bool& fresh) {
   xSemaphoreTake(sm, portMAX_DELAY);
   bool h = have && haveFor == key();
   if (h) y = cur;
-  fresh = h && nowUs() - gotUs < 6LL * 3600 * 1000000;   // старіше 6 год — уже не віримо
+  fresh = h && nowUs() - gotUs < 6LL * 3600 * 1000000;   // старіше 6 год — вже не віримо
   xSemaphoreGive(sm);
   return h && fresh;
 }

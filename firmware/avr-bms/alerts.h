@@ -5,7 +5,7 @@
     5 и полный разряд, ошибка аккумулятора, возможно придумай еще что-то)».
 
     Події — batev_core.h (на кожну батарею свій стан), мелодії, шаблони й кадри світла — alert_core.h; обидва ядра без
-    Arduino й перевірені на Mac (tests/batev, tests/alert). Тут — лише виводи, налаштування, черга звуків і сторінка.
+    Arduino й перевірені на комп'ютері (tests/batev, tests/alert). Тут — лише виводи, налаштування, черга звуків і сторінка.
       • Світло: два світлодіоди (зелений, червоний; ШІМ 5 кГц) чи стрічка WS2812B (RMT 10 МГц, як на Сторожі).
       • Звук: активний бузер (пищить сам від живлення; гучність — шпаруватість 25 кГц, як на Сторожі) чи пасивний
         (мелодії: частота ШІМ, гучність — шпаруватість до 50 %). Модулі «вмикається низьким рівнем» — галочкою.
@@ -68,7 +68,7 @@ static bool alertPinsOk(const AlertCfg& a, String& err) {
     for (int k = 0; k < i; k++) if (p[k] == p[i]) { err = String("GPIO") + p[i] + " вибрано двічі: " + nm[k] + " і " + nm[i]; return false; }
     if (L.on) {
       const int8_t d[6] = {L.clk, L.din, L.cs, L.rs, L.rst, L.bl};
-      for (int8_t x : d) if (x >= 0 && x == p[i]) { err = String("GPIO") + p[i] + " (" + nm[i] + ") уже зайнятий дисплеєм"; return false; }
+      for (int8_t x : d) if (x >= 0 && x == p[i]) { err = String("GPIO") + p[i] + " (" + nm[i] + ") вже зайнятий дисплеєм"; return false; }
     }
   }
   return true;
@@ -256,7 +256,7 @@ static bool alNight() {
 static uint32_t packAlarms(const jk::Cells& c) { return (c.err & ~jk::ERR_INFO) | (c.dis ? 0u : (1u << 31)); }
 //  Дані свіжі: «одна BMS» — хвилина (BMS шле кадр щосекунди); «по черзі» — період і ще 2 хв
 static uint32_t packFreshMs() { return pollMode ? (uint32_t)pollSec * 1000UL + 120000UL : 60000UL; }
-//  «BMS не на зв'язку»: 15 хв без даних (як у Сторожа й HA); «по черзі» — щонайменше два періоди й 5 хв
+//  «BMS не на зв'язку»: 15 хв без даних (як у Сторожа й Home Assistant); «по черзі» — щонайменше два періоди й 5 хв
 static uint32_t packLostMs() {
   uint32_t a = 15UL * 60 * 1000, b = pollMode ? 2UL * pollSec * 1000UL + 5UL * 60 * 1000 : 0;
   return a > b ? a : b;
@@ -338,7 +338,7 @@ static void alertPacks(uint32_t now) {
     x.dmv = c.n && c.vmax > c.vmin ? (uint16_t)(c.vmax - c.vmin) : 0;
     x.leftMin = R[i].slowMa <= -300 ? (int32_t)((float)c.remMah / -R[i].slowMa * 60.0f) : -1;
     bev::Cfg cf;
-    if (pollMode) { cf.errHoldMs = 0; cf.dirHoldMs = 0; }   // кадри рідко — кожен уже «тримається» період
+    if (pollMode) { cf.errHoldMs = 0; cf.dirHoldMs = 0; }   // кадри рідко — кожен вже «тримається» період
     uint8_t ev[8];
     int k = bev::feed(R[i].ev, x, cf, ev, 8);
     for (int j = 0; j < k; j++) alertEvent(i, ev[j]);

@@ -81,7 +81,7 @@ static void chipInit() {
   sentOk = false;
 }
 void lcdReload() {
-  //  1.0.26 («работать должно на лету»): дисплей уже працює на тих самих виводах — без скидання й мигання, лише контраст,
+  //  1.0.26 («работать должно на лету»): дисплей вже працює на тих самих виводах — без скидання й мигання, лише контраст,
   //  зсув, вигляд (інверсія, поворот) і підсвітка. Повне скидання — коли змінилися виводи чи дисплей вмикають.
   bool blSame = pBl >= 0 ? pBl == S.lcdBl : !(S.lcdBl && sigPinOk(S.lcdBl));
   if (S.lcdOn && pClk >= 0 && pRst == S.lcdRst && pCe == S.lcdCe && pDc == S.lcdDc && pDin == S.lcdDin && pClk == S.lcdClk && blSame) {
@@ -248,7 +248,7 @@ static void build(LcdView& v) {
     int sp = hm.indexOf(' ');
     if (sp > 0 && hm.indexOf(':') > sp) hm = hm.substring(0, sp);
     snprintf(v.since, sizeof v.since, "%s%s", genNow ? "працює з " : g == 1 ? "є з " : "немає з ", hm.c_str());
-    lcdDur(v.dur, sizeof v.dur, (now - since) / 1000000, exact);     // «уже 1 год 5 хв»; невідомо відколи — «понад …»
+    lcdDur(v.dur, sizeof v.dur, (now - since) / 1000000, exact);     // «вже 1 год 5 хв»; невідомо відколи — «понад …»
   }
   mqText = schLcdText();
   bool ph = (now / 500000) & 1;                    // фаза миготіння, 2 рази на секунду

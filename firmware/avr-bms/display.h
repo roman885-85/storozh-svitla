@@ -38,7 +38,7 @@ static bool lcdPinsOk(const LcdSet& s, String& err) {
     if (p[i] < 0) { if (i < 4) { err = String("Вивід ") + N[i] + " потрібен обов'язково"; return false; } continue; }
     if (!lcdPinAllowed(p[i])) { err = String("GPIO") + p[i] + " для " + N[i] + " не підходить"; return false; }
     for (int k = 0; k < i; k++) if (p[k] == p[i]) { err = String("GPIO") + p[i] + " вибрано двічі: " + N[k] + " і " + N[i]; return false; }
-    if (s.on && alertUsesPin(p[i])) { err = String("GPIO") + p[i] + " (" + N[i] + ") уже зайнятий світлом чи звуком — див. картки «Світло» і «Звук»"; return false; }
+    if (s.on && alertUsesPin(p[i])) { err = String("GPIO") + p[i] + " (" + N[i] + ") вже зайнятий світлом чи звуком — див. картки «Світло» і «Звук»"; return false; }
   }
   return true;
 }

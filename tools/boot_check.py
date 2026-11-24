@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """Перевірка запуску плати після прошивки по USB (18.11.2026).
 
-    venv/bin/python tools/boot_check.py <порт> <шаблон рядка запуску> [секунд]   — відкриває порт (це перезапускає плату)
-    venv/bin/python tools/boot_check.py --file <журнал.txt> <шаблон>             — перевірка на збереженому тексті
+    python3 tools/boot_check.py <порт> <шаблон рядка запуску> [секунд]   — відкриває порт (це перезапускає плату)
+    python3 tools/boot_check.py --file <журнал.txt> <шаблон>             — перевірка на збереженому тексті
 
 Чому: 18.11 об 11:59 запис 1.0.6 обірвався (esptool вийшов з помилкою), а я дивився лише останній рядок виводу.
 Плата до 12:15 вантажилась по колу («No bootable app partitions»), без сторінки й сповіщень. Тепер «готово» лише тоді,
@@ -25,6 +25,18 @@ def judge(text, want):
     return ok, hit >= 0, boots, bad, lines
 
 
+def is_native(port):
+    """Рідний USB ESP32-C3/S3 (Espressif, VID 0x303A) — на будь-якій системі; без pyserial-списку — за назвою порту."""
+    try:
+        from serial.tools import list_ports
+        for p in list_ports.comports():
+            if p.device == port and p.vid is not None:
+                return p.vid == 0x303A
+    except Exception:
+        pass
+    return bool(re.search(r'usbmodem|ttyACM', port))
+
+
 def read_port(port, sec, want):
     import serial
     for attempt in (1, 2):
@@ -36,7 +48,7 @@ def read_port(port, sec, want):
         t0, buf, seen_at, glitch = time.time(), b'', None, False
         #  Рідний USB (ESP32-C3/S3, cu.usbmodem*): відкриття порту плату не перезапускає, а рядок запуску вона друкує,
         #  поки порт ще ніхто не слухає, — тож питаємо «info» (маячок друкує той самий рядок з версією).
-        native, asked = 'usbmodem' in port, 0
+        native, asked = is_native(port), 0
         while time.time() - t0 < sec:
             if native and seen_at is None and asked < 3 and time.time() - t0 > 1.5 + 5 * asked:
                 s.write(b'info\n')

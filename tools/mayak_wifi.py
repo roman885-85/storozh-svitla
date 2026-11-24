@@ -4,7 +4,7 @@
 команді, ні в історії оболонки, ні у виводі (маячок у відповідь друкує лише назву мережі). Пише в маячок лише ця
 команда (правило власника: у флеш — тільки за командою).
 
-    venv/bin/python tools/mayak_wifi.py /dev/cu.usbmodem14601 "AVR-mist-5060"
+    python3 tools/mayak_wifi.py COM5 "AVR-mist-5060"
 """
 import getpass, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -20,10 +20,10 @@ def send(port, line, wait):
 
 def main():
     if len(sys.argv) < 3:
-        sys.exit('Запуск: venv/bin/python tools/mayak_wifi.py <порт маячка> "<назва мережі Сторожа для АВР>"')
+        sys.exit('Запуск: python3 tools/mayak_wifi.py <порт маячка> "<назва мережі Сторожа для АВР>"')
     port, ssid = sys.argv[1], sys.argv[2]
-    if not os.path.exists(port):
-        sys.exit('Порту %s немає — маячок під\'єднано до Mac?' % port)
+    if os.name != 'nt' and not os.path.exists(port):          # у Windows порт — «COM5», не файл
+        sys.exit('Порту %s немає — маячок під\'єднано до комп\'ютера?' % port)
     if not sys.stdin.isatty():
         sys.exit('Пароль вводять з клавіатури — запустіть це в терміналі')
     pw = getpass.getpass('Пароль мережі «%s» (на екрані не видно), потім Enter: ' % ssid)

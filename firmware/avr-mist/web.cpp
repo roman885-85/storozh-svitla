@@ -45,7 +45,7 @@ class GuardedServer : public WebServer {
   size_t _currentClientWrite(const char* b, size_t l) override { return ready() ? _currentClient.write(b, l) : 0; }
   size_t _currentClientWrite_P(PGM_P b, size_t l) override { return ready() ? _currentClient.write_P(b, l) : 0; }
  private:
-  WebGuard g;                                    // 1.0.43: відлік часу — webguard.h (перевірка на Mac: tests/webguard)
+  WebGuard g;                                    // 1.0.43: відлік часу — webguard.h (перевірка на комп'ютері: tests/webguard)
   int64_t noteUs = 0;
   bool ready() {
     if (g.dead) return false;
@@ -215,7 +215,7 @@ static void loginPage(int code, const String& err) {
 }
 
 //  Невдалі спроби: кожна — щонайменше 1 с відповіді; 5 за хвилину — вхід не приймаємо 60 с, кожна наступна пауза вдвічі
-//  довша (до 15 хв). 1.0.21: сторінка тепер відкрита й з інтернету (адреса KeenDNS роутера), тож 10 невдач за годину —
+//  довша (до 15 хв). 1.0.21: сторінка тепер відкрита й з інтернету (через DDNS роутера), тож 10 невдач за годину —
 //  попередження адміністраторам у Telegram. Усі запити йдуть через роутер — одна адреса, тож рахуємо всі разом, а
 //  справжню адресу беремо із заголовка X-Forwarded-For, якщо роутер його дав.
 static int64_t failUs[5] = {0};
@@ -705,7 +705,7 @@ static void hSettingsPost() {
   if (srv.hasArg("pwBtn")) {
     long v = srv.arg("pwBtn").toInt();
     if (v != 0 && (v == 2 || !sigPinOk(v))) return fail("Вивід кнопки скидання пароля — виберіть зі списку");
-    if (const char* u = sigUses(n, v)) return fail(String("GPIO") + v + " уже зайнятий " + u + " (вкладка «Сигнали») — виберіть для кнопки інший вивід");
+    if (const char* u = sigUses(n, v)) return fail(String("GPIO") + v + " вже зайнятий " + u + " (вкладка «Сигнали») — виберіть для кнопки інший вивід");
     n.pwBtn = (uint8_t)v;
   }
 
@@ -843,7 +843,7 @@ static void hBeacon() {
 }
 
 //  Сторінка мосту батареї через Сторожа (1.0.39): /bms/… → http://<адреса мосту в мережі Сторожа>/…
-//  Міст стоїть за Сторожем (мережа 10.77.0.x) — з мережі церкви чи через KeenDNS до нього не дістатись, а його
+//  Міст стоїть за Сторожем (мережа 10.77.0.x) — з мережі об'єкта чи через DDNS роутера до нього не дістатись, а його
 //  налаштування (дисплей, яку BMS слухати) власник шукає тут, на сторінці Сторожа. Вхід — той самий, що й на Сторожа.
 //  Запит — з параметрами форми; відповідь мосту віддаємо шматками по 512 Б, тож пам'яті це майже не бере.
 static String urlEnc(const String& s) {
@@ -1036,7 +1036,7 @@ static void hScan() {
 //           свої звуки видаляються, перезапуск за 10 с (час надіслати повідомлення).
 static void hReset() {
   if (!auth()) return;
-  if (restartPending) return fail("Сторож уже перезапускається — зачекайте");
+  if (restartPending) return fail("Сторож вже перезапускається — зачекайте");
   String w = srv.arg("what");
   if (w == "prefs") {
     if (!settingsResetPrefs()) return fail("Не вдалося скинути налаштування");

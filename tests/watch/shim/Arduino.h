@@ -1,4 +1,4 @@
-// Мінімальна заміна Arduino для перевірки watch.cpp на Mac (tests/watch). Лише те, що вживає watch.cpp.
+// Мінімальна заміна Arduino для перевірки watch.cpp на комп'ютері (tests/watch). Лише те, що вживає watch.cpp.
 #pragma once
 #include <string>
 #include <cstdint>

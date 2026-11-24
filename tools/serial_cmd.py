@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 """Надсилає рядок у плату по USB і друкує відповідь.
 
-    venv/bin/python tools/serial_cmd.py /dev/cu.usbserial-0001 "info" [секунд]
-    venv/bin/python tools/serial_cmd.py /dev/cu.usbmodem1101 "" 30        # лише читати
+    python3 tools/serial_cmd.py /dev/cu.usbserial-0001 "info" [секунд]
+    python3 tools/serial_cmd.py /dev/cu.usbmodem1101 "" 30        # лише читати
 
 Два способи відкриття порту:
   • міст USB-UART (CP2102, CH340: cu.usbserial*, cu.SLAB*, cu.wchusbserial*) — pyserial. Власне читання через
-    os.read на macOS 15 з CP2102 давало «повтор хвоста»: мегабайти того самого шматка рядка (17.11.2026).
+    os.read у macOS 15 з CP2102 давало «повтор хвоста»: мегабайти того самого шматка рядка (17.11.2026).
     Відкриття порту перезапускає таку плату — для журналу запуску це навіть добре.
-  • рідний USB ESP32-C3/S3 (cu.usbmodem*) — os.open без смикання DTR/RTS: підняте DTR защіпає GPIO0,
+  • рідний USB ESP32-C3/S3 (cu.usbmodem*, ttyACM*, у Windows — COM з VID 303A) — os.open без смикання DTR/RTS: підняте DTR защіпає GPIO0,
     і наступне скидання йде в завантажувач (пам'ять про ES3C28P).
 Захист: 115 200 бод — це ~11,5 КБ/с; більше — збій драйвера, читання зупиняється."""
 import os, select, struct, sys, time
@@ -81,13 +81,14 @@ def via_fd(port, line, wait):
 def main():
     port, line = sys.argv[1], sys.argv[2]
     wait = float(sys.argv[3]) if len(sys.argv) > 3 else 3.0
-    if 'usbmodem' in port:
+    #  24.11.2026: і в Linux (ttyACM*) — без смикання DTR; у Windows (COM…) — через pyserial з DTR/RTS вимкненими до відкриття
+    if os.name != 'nt' and ('usbmodem' in port or 'ttyACM' in port):
         via_fd(port, line, wait)
     else:
         try:
             via_pyserial(port, line, wait)
         except ImportError:
-            sys.exit('Потрібен pyserial: запускайте venv/bin/python (venv: /usr/bin/python3 -m venv venv; venv/bin/pip install pyserial)')
+            sys.exit('Потрібен pyserial: python3 -m pip install pyserial (у Windows: py -m pip install pyserial)')
 
 
 if __name__ == '__main__':

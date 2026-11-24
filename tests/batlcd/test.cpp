@@ -1,4 +1,4 @@
-// Картинки екрана мосту батареї (Open-Smart 1,8″, 128×64, ST7567) для перевірки на Mac:
+// Картинки екрана мосту батареї (Open-Smart 1,8″, 128×64, ST7567) для перевірки на комп'ютері:
 // tests/batlcd/run.sh → tests/batlcd/out/*.png — тим самим кодом, що в прошивці (firmware/avr-bms/batlcd_core.h).
 #include "../../firmware/avr-bms/batlcd_core.h"
 #include <cstdio>

@@ -186,7 +186,7 @@ String factoryMessage(const String& who) {
 
 // ---------- стан і відколи — у RTC (1.0.26) ----------
 static const uint32_t RW_MAGIC = 0x52574131;           // «RWA1»
-static uint32_t rwSum(const RtcWatchData& d) {         // FNV-1a — без ROM-функцій, щоб перевірялось і на Mac
+static uint32_t rwSum(const RtcWatchData& d) {         // FNV-1a — без ROM-функцій, щоб перевірялось і на комп'ютері
   const uint8_t* p = (const uint8_t*)&d;
   uint32_t h = 2166136261u;
   for (size_t i = 0; i < sizeof d; i++) h = (h ^ p[i]) * 16777619u;

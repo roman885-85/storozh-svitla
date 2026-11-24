@@ -68,7 +68,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
  <div class="card" id="rows"></div>
  <div class="card hide" id="batcard"><b>🔋 Батарея</b> <span id="batsub" class="mut"></span><div id="batbody" style="margin-top:6px"></div>
   <label class="ck" style="margin-top:10px"><input type="checkbox" id="bat_on"> Сповіщати про батарею</label>
-  <div class="mut">Заряд нижче 50, 30, 20, 10 % і «вистачить менше ніж на 3 год / на годину» — коли міського світла немає; тривоги BMS; «BMS не на зв'язку» (15 хв без даних) — адміністраторам. Отримують адміністратори й ті, у кого в сповіщеннях увімкнено «🔋 Батарея». Як у HA.</div></div>
+  <div class="mut">Заряд нижче 50, 30, 20, 10 % і «вистачить менше ніж на 3 год / на годину» — коли міського світла немає; тривоги BMS; «BMS не на зв'язку» (15 хв без даних) — адміністраторам. Отримують адміністратори й ті, у кого в сповіщеннях увімкнено «🔋 Батарея».</div></div>
  <div class="card" id="schcard"><b>Графік відключень</b> <span id="schq" class="mut"></span>
   <div id="schline" style="margin-top:6px"></div><div id="schdays"></div><div id="schinfo" class="mut" style="margin-top:8px"></div><div id="schbtn"></div></div>
  <div class="card"><details id="stdet"><summary>Статистика світла: скільки було й не було</summary><div id="sttext" class="mut" style="white-space:pre-wrap;margin-top:8px"></div></details></div>
@@ -242,7 +242,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--acc)}details ol{paddin
   <div class="mut">Вибір мережі в списку «Знайти» підставляє адресу саме цієї точки. Сторож триматиметься її, а коли вона недоступна, тимчасово перейде на найсильнішу й повернеться, щойно вона знову з'явиться. Порожньо — будь-яка точка з цією назвою.</div>
   <label>Пароль <span id="h_staPass"></span></label><input id="f_staPass" type="password" placeholder="не змінювати" autocomplete="new-password">
   <label class="ck" style="margin-top:10px"><input type="checkbox" id="f_mdnsOn"> Назва http://avr-mist.local у мережі роутера (mDNS)</label>
-  <div class="mut">Типово вимкнено: назва забирає близько 8 КБ пам'яті Сторожа. Сторінку відкривають за адресою з рядка «Роутер» на вкладці «Стан» (закріпіть її за Сторожем у роутері) або через KeenDNS.</div>
+  <div class="mut">Типово вимкнено: назва забирає близько 8 КБ пам'яті Сторожа. Сторінку відкривають за адресою з рядка «Роутер» на вкладці «Стан» (закріпіть її за Сторожем у роутері), з інтернету — через DDNS чи віддалений доступ роутера.</div>
  </div>
  <div class="card"><b>Точка доступу для АВР</b>
   <label>Назва</label><input id="f_apSsid" maxlength="32">
@@ -313,6 +313,9 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.
 window.addEventListener('message',e=>{if(e.origin===location.origin&&e.data&&e.data.schemesH)$('insf').style.height=(e.data.schemesH+16)+'px'});
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function hrs(s){s=Math.max(0,s|0);const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h?(m?h+' год '+m+' хв':h+' год'):(m?m+' хв':'менше хвилини')}
+//  1.0.55: «з 12:07, вже 1 год 9 хв» — at від Сторожа «о 12:07» (сьогодні), «23.11 о 13:30» чи «5 хв тому» (годинника немає);
+//  до 1.0.55 виходило «з о 12:07» (власник 24.11.2026 про цей рядок: «слово УЖЕ отсутствует в украинском языке, есть слово ВЖЕ»)
+function sinceT(t){const at=String(t.at||'');return t.exact?(/тому$|^щойно$/.test(at)?'вже ':'з '+at.replace(/^о /,'')+', вже ')+ago(t.ago):'щонайменше '+ago(t.ago)}
 function ago(s){if(s==null)return '—';s=Math.max(0,s|0);if(s<60)return s+' с';if(s<3600)return Math.floor(s/60)+' хв';if(s<86400)return Math.floor(s/3600)+' год '+Math.floor(s%3600/60)+' хв';return Math.floor(s/86400)+' д '+Math.floor(s%86400/3600)+' год'}
 function note(id,text,bad){const e=$(id);e.className='msg'+(bad?' err':'');e.textContent=text}
 function relogin(){let t=0;try{t=+sessionStorage.getItem('rl')||0}catch(e){}if(Date.now()-t<10000)return;try{sessionStorage.setItem('rl',String(Date.now()))}catch(e){}location.reload()}
@@ -375,14 +378,14 @@ function renderDev(d){
  $('clhint').textContent=aY?'АВР-ом зараз призначено пристрій, з якого відкрито цю сторінку. Справжній АВР з\'явиться окремим рядком, коли його підключать у застосунку eWeLink до точки «'+n.ap.ssid+'».':
   !w.avr.assigned&&unk===1?'У мережі Сторожа один невідомий пристрій. Якщо АВР щойно підключали в eWeLink, це він: натисніть «Це АВР».':
   (!w.avr.assigned&&!unk?'Підключіть АВР у застосунку eWeLink до точки «'+n.ap.ssid+'».':
-  oth?'АВР уже прив\'язано ('+avr+'). «Це новий АВР» — лише якщо АВР замінили: тоді Сторож стежитиме за новим, а не за старим.':'');
+  oth?'АВР вже прив\'язано ('+avr+'). «Це новий АВР» — лише якщо АВР замінили: тоді Сторож стежитиме за новим, а не за старим.':'');
 }
 function render(d){
  const w=d.watch,g=w.grid.st,l=w.line.st,le=w.line.enabled;
  $('obj').textContent='· '+w.obj;
  $('status').textContent=w.status.charAt(0).toUpperCase()+w.status.slice(1);
  $('dot').className='dot '+(g===1?(le&&l===1?'gen':'on'):g===0?(le&&l===1?'gen':'off'):'');
- $('since').textContent=w.avr.assigned&&g>=0?((w.grid.exact?'з '+w.grid.at+', уже ':'щонайменше ')+ago(w.grid.ago)):'';
+ $('since').textContent=w.avr.assigned&&g>=0?sinceT(w.grid):'';
  let r='';const row=(a,b)=>{r+='<div class="row"><span>'+a+'</span><span>'+b+'</span></div>'};
  row('Місто: АВР на зв\'язку',!w.avr.assigned?'АВР не призначено':g===1?'є':g===0?'немає':'визначається');
  const st2=d.stats||{};if(st2.ok)row('Сьогодні','🟢 '+hrs(st2.on)+' · 🔴 '+hrs(st2.off)+' · відключень '+st2.outs);
@@ -390,7 +393,7 @@ function render(d){
  if(le)row('Генератор: маячок',l===1?(g===1?'<b class="err">ще працює — вимкніть</b>':'працює'):l===0?'не працює':'визначається');
  const BL=(w.bcn&&w.bcn.list)||[];
  for(const b of BL){if(!b.cfg||b.role==='g')continue;const nm=esc(b.name||('маячок '+b.mac.slice(9)));
-  if(b.role==='l'){const t=b.t||{st:-1},sn=(t.exact?'з '+esc(t.at)+', ':'щонайменше ')+ago(t.ago);row('Лінія «'+nm+'»',t.st===1?'є напруга · '+sn:t.st===0?'<b class="err">немає напруги</b> · '+sn:'визначається')}
+  if(b.role==='l'){const t=b.t||{st:-1},sn=esc(sinceT(t));row('Лінія «'+nm+'»',t.st===1?'є напруга · '+sn:t.st===0?'<b class="err">немає напруги</b> · '+sn:'визначається')}
   else row('Маячок «'+nm+'»',b.seen&&b.alive?'на зв\'язку, '+b.rssi+' дБм':b.seen?'мовчить '+ago(b.ago):'не чув від запуску Сторожа')}
  const st=d.net.sta;
  row('Роутер',st.up?esc(st.ssid)+', '+st.rssi+' дБм, '+st.ip+(st.bssid?', точка '+esc(st.bssid)+(st.pref===false?' <b class="err">не бажана</b>':''):''):(st.ssid?esc(st.ssid)+': немає зв\'язку':'не налаштовано'));
@@ -421,7 +424,7 @@ function render(d){
  $('ver').textContent='Зараз: '+d.ver+', збірка '+d.build;
  let s='';
  lastTg=t;
- for(const x of t.seen){const g=String(x.id).startsWith('-');s+='<div style="margin:6px 0">'+esc(x.name||'без назви')+' <span class="mut">'+(g?'група':'людина')+', '+ago(x.ago)+' тому: «'+esc(x.text)+'»</span> '+(x.rcp?'<span class="mut">— уже отримує</span>':'<button data-act="add" data-id="'+esc(x.id)+'" data-name="'+esc(x.name)+'">Додати</button>')+'</div>'}
+ for(const x of t.seen){const g=String(x.id).startsWith('-');s+='<div style="margin:6px 0">'+esc(x.name||'без назви')+' <span class="mut">'+(g?'група':'людина')+', '+ago(x.ago)+' тому: «'+esc(x.text)+'»</span> '+(x.rcp?'<span class="mut">— вже отримує</span>':'<button data-act="add" data-id="'+esc(x.id)+'" data-name="'+esc(x.name)+'">Додати</button>')+'</div>'}
  $('seen').innerHTML=s?'<b>Писали боту:</b>'+s:'<span class="mut">Поки ніхто не писав боту.</span>';
  document.querySelectorAll('.botn').forEach(e=>e.textContent=t.bot?'@'+t.bot:'вашого бота');
  document.querySelectorAll('.botu').forEach(e=>e.textContent=t.bot||'ім\'я_бота');
